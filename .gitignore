@@ -3,7 +3,5 @@ __pycache__/
 venv/
 .DS_Store
 **/.DS_Store
-uploads/*.goo
-uploads/*.ctb
-uploads/*.stl
 printer_ip.txt
+uploads/
