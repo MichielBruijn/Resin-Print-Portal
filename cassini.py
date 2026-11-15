@@ -251,7 +251,7 @@ def main():
     logging.info(f'Printer: {printer.describe()} ({printer.addr[0]})')
     if printer.busy:
         pstat = printer.desc['Data']['Status']['PrintInfo']['Status']
-        if pstat in (PrintInfoStatus.COMPLETE, PrintInfoStatus.STOPPED):
+        if pstat in (PrintInfoStatus.COMPLETE, PrintInfoStatus.STOPPED, PrintInfoStatus.CANCELED):
             logging.error('Previous print finished: confirm the screen on the printer first')
         else:
             logging.error(f'Printer is busy (status: {printer.current_status})')

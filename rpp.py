@@ -85,6 +85,8 @@ def print_status():
                 progress = 0
         else:
             current_layer, total_layers, progress = 'N/A', 'N/A', 0
+        if re.search(r'Print Status: (CANCELED|STOPPED|IDLE)', output):
+            progress = 0  # nothing running; the layer count is from the aborted job
 
         elapsed_s = remaining_s = None
         tmatch = re.search(r'Time: (\d+):(\d\d):(\d\d) / (\d+):(\d\d):(\d\d)', output)

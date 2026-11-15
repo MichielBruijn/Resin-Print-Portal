@@ -34,7 +34,7 @@ class PrintInfoStatus(IntEnum):
     PAUSED_LIFTED = 8
     STOPPING = 10
     STOPPED = 13
-    PAUSED = 14
+    CANCELED = 14  # after Stop (RPP or touchscreen); was named PAUSED upstream
     COMPLETE = 16
 
     @classmethod
