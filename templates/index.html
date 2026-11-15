@@ -34,6 +34,15 @@
       <button class="btn btn-resume" id="btn-resume" onclick="resumePrint()" style="display:none;">&#9654; Resume</button>
       <button class="btn btn-stop" onclick="stopPrint()">&#9632; Stop</button>
     </div>
+    <div class="mix-panel" id="mix-panel" style="display:none;">
+      <div class="mix-title">Mix resin <span class="mix-hint">platform pumps up and down, no exposure</span></div>
+      <div class="mix-row">
+        <label>Cycles <input type="number" id="mix-cycles" min="1" max="500" value="60" oninput="updateMixEstimate()"></label>
+        <label>Stroke <input type="number" id="mix-stroke" min="2" max="40" step="1" value="15" oninput="updateMixEstimate()"> mm</label>
+        <span class="mix-estimate" id="mix-estimate"></span>
+        <button class="btn btn-mix" onclick="startMix()">&#8645; Mix</button>
+      </div>
+    </div>
   </section>
 
   <section class="card files-card">

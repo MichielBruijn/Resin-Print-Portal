@@ -3,6 +3,7 @@
 let selectedFile = null;
 
 document.addEventListener('DOMContentLoaded', (event) => {
+    updateMixEstimate();
     fetchPrintStatus();
     fetchFiles();
     loadPrinterIP();
@@ -181,6 +182,11 @@ function checkProgress(filename) {
         .then(response => response.json())
         .then(data => {
             updatePrintProgress(data.progress);
+            if (data.error) {
+                hideLoadingIndicator();
+                alert('Error: ' + data.error);
+                return;
+            }
             if (data.progress < 100) {
                 setTimeout(() => checkProgress(filename), 1000); // Poll every second
             }
@@ -217,7 +223,11 @@ function fetchPrintStatus() {
             const isPausedHW = data.is_online && data.status && data.status.includes('PAUSED_HW');
             const isPausedLifted = !isPausedHW && data.is_online && data.status && data.status.includes('PAUSED_LIFTED');
             const isPaused = isPausedHW || isPausedLifted;
-            const isBusy = data.is_online && data.status && data.status.includes('BUSY');
+            // After a job the printer stays BUSY with COMPLETE/STOPPED: not active
+            const isDone = data.status && /Print Status: (COMPLETE|STOPPED|IDLE)/.test(data.status);
+            const isBusy = data.is_online && data.status && data.status.includes('BUSY') && !isDone;
+            const mixPanel = document.getElementById('mix-panel');
+            if (mixPanel) mixPanel.style.display = (data.is_online && !isBusy && !isPaused) ? 'block' : 'none';
             if (controls) {
                 controls.style.display = (isBusy || isPaused) ? 'flex' : 'none';
                 if (btnPause) btnPause.style.display = isPaused ? 'none' : 'inline-block';
@@ -227,6 +237,39 @@ function fetchPrintStatus() {
         .catch(error => {
             console.error('Error:', error);
             document.getElementById('status').innerText = 'Error loading status.';
+        });
+}
+
+// Same estimate as goo_file.mix_seconds()
+function updateMixEstimate() {
+    const cycles = parseInt(document.getElementById('mix-cycles').value) || 0;
+    const stroke = parseFloat(document.getElementById('mix-stroke').value) || 0;
+    const perCycle = 2 * (1 / 150 + Math.max(stroke - 1, 0) / 500) * 60 + 1.6;
+    document.getElementById('mix-estimate').textContent = `≈ ${Math.max(1, Math.round(perCycle * cycles / 60))} min`;
+}
+
+function startMix() {
+    const cycles = parseInt(document.getElementById('mix-cycles').value);
+    const stroke = parseFloat(document.getElementById('mix-stroke').value);
+    if (!confirm(`Mix resin: ${cycles} cycles of ${stroke} mm?`)) return;
+    showLoadingIndicator('Preparing mix...');
+    fetch('/mix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cycles: cycles, stroke: stroke }),
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                hideLoadingIndicator();
+                alert(data.error);
+            } else {
+                checkProgress(data.filename);
+            }
+        })
+        .catch(error => {
+            hideLoadingIndicator();
+            console.error('Error:', error);
         });
 }
 
