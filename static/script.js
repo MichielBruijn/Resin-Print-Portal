@@ -58,8 +58,10 @@ function editIP() {
 function uploadFile() {
     let input = document.createElement('input');
     input.type = 'file';
+    input.accept = '.ctb,.goo';
     input.onchange = e => {
         let file = e.target.files[0];
+        if (!file) return;
         let formData = new FormData();
         formData.append('file', file);
 
@@ -86,7 +88,10 @@ function uploadFile() {
                 alert('Upload complete!');
                 fetchFiles(); // Refresh list after upload
             } else {
-                alert('An error occurred during the upload.');
+                hideLoadingIndicator();
+                let msg = 'An error occurred during the upload.';
+                try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+                alert(msg);
             }
         };
 
@@ -131,7 +136,7 @@ function printSelectedFile() {
 }
 
 function updatePrintProgress(percent) {
-    showLoadingIndicator(`Printing... (${percent}%)`);
+    showLoadingIndicator(`Sending to printer... (${percent}%)`);
     updateLoadingPercentage(percent);
 
     if (percent >= 100) {
@@ -148,9 +153,10 @@ function showLoadingIndicator(message) {
         loadingDiv.id = 'loading-indicator';
         loadingDiv.innerHTML = `
             <div class="loading-spinner"></div>
-            <p id="loading-msg">${message}</p>
+            <p id="loading-msg"></p>
             <p id="loading-percentage">0%</p>`;
         document.body.appendChild(loadingDiv);
+        document.getElementById('loading-msg').innerText = message;
     } else {
         document.getElementById('loading-msg').innerText = message;
     }
@@ -171,7 +177,7 @@ function updateLoadingPercentage(percent) {
 }
 
 function checkProgress(filename) {
-    fetch(`/progress/${filename}`)
+    fetch(`/progress/${encodeURIComponent(filename)}`)
         .then(response => response.json())
         .then(data => {
             updatePrintProgress(data.progress);
@@ -186,11 +192,11 @@ function fetchPrintStatus() {
     fetch('/print-status')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('status').innerText = data.status;
+            document.getElementById('status').innerText = data.status || data.error || '';
             let progressBar = document.getElementById('progress-bar');
             let progressText = document.getElementById('progress-text');
 
-            let progressValue = parseFloat(data.progress).toFixed(2);
+            let progressValue = (parseFloat(data.progress) || 0).toFixed(2);
             if (progressBar) progressBar.style.width = progressValue + '%';
             if (progressText) progressText.innerText = progressValue + '%';
 
@@ -252,11 +258,6 @@ function resumePrint() {
         });
 }
 
-function escapeHtml(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-              .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
 function fetchFiles() {
     fetch('/files')
         .then(response => response.json())
@@ -307,8 +308,8 @@ function deleteSelectedFile() {
         })
             .then(response => response.json())
             .then(data => {
-                alert(data.message);
-                selectedFile = null;
+                alert(data.message || ('Error: ' + data.error));
+                if (data.message) selectedFile = null;
                 fetchFiles();
             })
             .catch(error => console.error('Error:', error));

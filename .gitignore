@@ -6,3 +6,4 @@ venv/
 uploads/*.goo
 uploads/*.ctb
 uploads/*.stl
+printer_ip.txt

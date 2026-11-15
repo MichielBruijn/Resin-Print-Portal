@@ -1,20 +1,23 @@
 #!/bin/bash
+# One-shot install of RPP in /opt/RPP as a systemd service
+set -e
+
 sudo apt update
-sudo apt install git
-sudo apt install python3-pip
-sudo apt install python3-flask
-sudo pip3 install alive-progress --break-system-packages
+sudo apt install -y git python3-venv
 
-cd /opt/
-git clone https://github.com/michielbruijn/RPP.git
+if [ ! -d /opt/RPP ]; then
+    sudo git clone https://github.com/MichielBruijn/Resin-Print-Portal.git /opt/RPP
+fi
+cd /opt/RPP
 
-sudo chmod -R 775 /opt/RPP/uploads
-sudo chown -R www-data:www-data /opt/RPP/uploads
-sudo chmod -R 775 /opt/RPP/printer_ip.txt
-sudo chown -R www-data:www-data /opt/RPP/printer_ip.txt
+sudo python3 -m venv venv
+sudo venv/bin/pip install -r requirements.txt
 
-cd RPP
+sudo mkdir -p uploads
+sudo touch printer_ip.txt
+sudo chown -R www-data:www-data uploads printer_ip.txt
+sudo chmod -R 775 uploads printer_ip.txt
 
-sudo mv rpp.service /etc/systemd/system/
-sudo systemctl enable rpp
-sudo systemctl start rpp
+sudo cp rpp.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now rpp
