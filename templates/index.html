@@ -25,6 +25,7 @@
       </div>
     </div>
     <div id="status" class="status-text">Loading...</div>
+    <div id="confirm-hint" class="confirm-hint" style="display:none;">Print finished &mdash; confirm the screen on the printer before starting a new job.</div>
     <div class="progress-container">
       <div class="progress-bar" id="progress-bar"></div>
       <span class="progress-text" id="progress-text">0%</span>
@@ -40,7 +41,7 @@
         <label>Cycles <input type="number" id="mix-cycles" min="1" max="500" value="60" oninput="updateMixEstimate()"></label>
         <label>Stroke <input type="number" id="mix-stroke" min="2" max="40" step="1" value="15" oninput="updateMixEstimate()"> mm</label>
         <span class="mix-estimate" id="mix-estimate"></span>
-        <button class="btn btn-mix" onclick="startMix()">&#8645; Mix</button>
+        <button class="btn btn-mix" id="btn-mix" onclick="startMix()">&#8645; Mix</button>
       </div>
     </div>
   </section>

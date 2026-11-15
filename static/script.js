@@ -226,6 +226,12 @@ function fetchPrintStatus() {
             // After a job the printer stays BUSY with COMPLETE/STOPPED: not active
             const isDone = data.status && /Print Status: (COMPLETE|STOPPED|IDLE)/.test(data.status);
             const isBusy = data.is_online && data.status && data.status.includes('BUSY') && !isDone;
+            // Printer keeps BUSY until its 'print complete' screen is confirmed
+            const needsConfirm = data.is_online && isDone && data.status.includes('BUSY');
+            const hint = document.getElementById('confirm-hint');
+            if (hint) hint.style.display = needsConfirm ? 'block' : 'none';
+            const btnMix = document.getElementById('btn-mix');
+            if (btnMix) btnMix.disabled = needsConfirm;
             const mixPanel = document.getElementById('mix-panel');
             if (mixPanel) mixPanel.style.display = (data.is_online && !isBusy && !isPaused) ? 'block' : 'none';
             if (controls) {
