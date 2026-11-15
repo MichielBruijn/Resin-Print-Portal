@@ -319,17 +319,28 @@ function fetchFiles() {
                 tr.addEventListener('click', () => selectFile(fileInfo.name));
                 const tdName = document.createElement('td');
                 tdName.textContent = fileInfo.name;
+                const tdDate = document.createElement('td');
+                tdDate.className = 'file-date';
+                tdDate.textContent = formatDate(fileInfo.uploaded);
                 const tdSize = document.createElement('td');
+                tdSize.className = 'file-size';
                 tdSize.textContent = fileInfo.size + ' MB';
                 tr.appendChild(tdName);
+                tr.appendChild(tdDate);
                 tr.appendChild(tdSize);
                 tbody.appendChild(tr);
             });
         })
         .catch(error => {
             console.error('Error:', error);
-            document.getElementById('file-list').querySelector('tbody').innerHTML = '<tr><td colspan="2">Error loading files.</td></tr>';
+            document.getElementById('file-list').querySelector('tbody').innerHTML = '<tr><td colspan="3">Error loading files.</td></tr>';
         });
+}
+
+// e.g. 15-11-2026 20:40
+function formatDate(epoch) {
+    if (!epoch) return '';
+    return new Date(epoch * 1000).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' }).replace(',', '');
 }
 
 function selectFile(filename) {

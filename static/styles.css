@@ -271,6 +271,12 @@ body {
     color: #fff;
 }
 
+.file-list .file-date,
+.file-list .file-size {
+    white-space: nowrap;
+    color: var(--muted);
+}
+
 /* === Action buttons === */
 .action-buttons {
     display: flex;
