@@ -17,7 +17,7 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 
 ### `rpp.py` — Flask web server (main entry point)
 
-The central application. Starts a Flask HTTP server on port 5001 and exposes the REST API that the browser calls:
+The central application. Starts a Flask HTTP server on port 5001 (debug mode off) and exposes the REST API that the browser calls:
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -25,7 +25,7 @@ The central application. Starts a Flask HTTP server on port 5001 and exposes the
 | `/get-printer-ip` | GET | Returns the currently configured printer IP |
 | `/set-printer-ip` | POST | Saves a new printer IP to `printer_ip.txt` |
 | `/print-status` | GET | Polls the printer status via Cassini and returns JSON with current layer, total layers, progress %, and online state |
-| `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder |
+| `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder (other extensions are rejected) |
 | `/files` | GET | Lists all files in `uploads/` with their size in MB |
 | `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print |
 | `/progress/<filename>` | GET | Returns upload/transfer progress for a running print job (0–100) |
@@ -34,7 +34,7 @@ The central application. Starts a Flask HTTP server on port 5001 and exposes the
 | `/resume-print` | POST | Sends a resume command to the printer via Cassini |
 | `/delete-file` | POST | Deletes a file from the `uploads/` folder |
 
-Print jobs run in a background thread with a mutex (`print_lock`) so only one job runs at a time.
+Print jobs run in a background thread with a mutex (`print_lock`) so only one job runs at a time. Filenames sent by the browser are validated, so `/print-file` and `/delete-file` can only touch files inside `uploads/`.
 
 ---
 
@@ -134,7 +134,7 @@ Dark-theme CSS for the web interface. Card layout, progress bar styling, button 
 
 ### `printer_ip.txt` — Printer address
 
-Plain-text file containing the IP address or hostname of the printer. Read on every request by `rpp.py`; written when the user saves a new address via the web UI. Not committed to git (contains your local network config).
+Plain-text file containing the IP address or hostname of the printer. Read on every request by `rpp.py`; written when the user saves a new address via the web UI. Not tracked by git (it's in `.gitignore`), so updates don't overwrite it.
 
 ---
 
@@ -146,25 +146,26 @@ Runs `rpp.py` as a systemd service under the `www-data` user, restarting automat
 
 ### `install.sh` — Installation script
 
-One-shot setup: installs dependencies (`git`, `python3-pip`, `python3-flask`, `alive-progress`), clones the repo to `/opt/RPP`, sets permissions on `uploads/` and `printer_ip.txt`, and enables + starts the systemd service.
+One-shot setup: installs `git` and `python3-venv`, clones the repo to `/opt/RPP`, creates a virtualenv with the packages from `requirements.txt`, creates `uploads/` and `printer_ip.txt` with the right permissions, and enables + starts the systemd service.
 
 ---
 
 ### `update.sh` — Update script
 
-Pulls the latest version from GitHub (`git reset --hard HEAD && git pull`), and resets permissions on the writable files. Run manually when a new version is available.
+Pulls the latest version from GitHub (`git reset --hard HEAD && git pull`) while keeping your `printer_ip.txt`, updates the virtualenv, resets permissions on the writable files and restarts the service. Don't run it while a file is being sent to the printer (a print that is already running is not affected).
 
 ---
 
 ### `requirements.txt`
 
-Python dependencies beyond the standard library and Flask (which is installed via apt):
+Python dependencies, installed into `/opt/RPP/venv`:
 
 ```
+flask>=3.0
 alive-progress==3.1.4
 ```
 
-Used for animated progress bars in the CLI. Not required for the web interface.
+`alive-progress` is only used for animated progress bars in the CLI.
 
 ---
 
@@ -172,50 +173,34 @@ Used for animated progress bars in the CLI. Not required for the web interface.
 
 Tested on Ubuntu 24.04.
 
-**Install dependencies:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/MichielBruijn/Resin-Print-Portal/main/install.sh | bash
+```
+
+Or step by step:
+
 ```bash
 sudo apt update
-sudo apt install git python3-pip python3-flask
-sudo pip3 install alive-progress --break-system-packages
+sudo apt install -y git python3-venv
+sudo git clone https://github.com/MichielBruijn/Resin-Print-Portal.git /opt/RPP
+cd /opt/RPP
+sudo python3 -m venv venv
+sudo venv/bin/pip install -r requirements.txt
+sudo mkdir -p uploads && sudo touch printer_ip.txt
+sudo chown -R www-data:www-data uploads printer_ip.txt
+sudo cp rpp.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now rpp
 ```
 
-**Clone the repository:**
-```bash
-cd /opt/
-git clone https://github.com/MichielBruijn/RPP.git
-cd RPP
-```
+Set the printer IP address or hostname in the web UI (or `echo 192.168.1.50 | sudo tee printer_ip.txt`).
 
-**Set permissions:**
-```bash
-sudo chmod 775 /opt/RPP/uploads /opt/RPP/printer_ip.txt
-sudo chown www-data:www-data /opt/RPP/uploads /opt/RPP/printer_ip.txt
-```
-
-**Optional — set printer IP now:**
-```bash
-echo 192.168.1.50 > printer_ip.txt
-```
-
-**Install and start the service:**
-```bash
-sudo mv rpp.service /etc/systemd/system/
-sudo systemctl enable rpp
-sudo systemctl start rpp
-sudo systemctl status rpp
-```
-
-The interface runs on port **5001**. Use a reverse proxy (nginx, Apache) to expose it on port 80/443.
+The interface runs on port **5001**. It has no authentication: only expose it on a trusted network, or put a reverse proxy (nginx, Apache) with authentication in front of it.
 
 ## Update
 
 ```bash
-cd /opt/RPP/
-sudo git reset --hard HEAD
-sudo git pull
-sudo chmod 775 /opt/RPP/uploads /opt/RPP/printer_ip.txt
-sudo chown www-data:www-data /opt/RPP/uploads /opt/RPP/printer_ip.txt
-sudo systemctl restart rpp
+bash /opt/RPP/update.sh
 ```
 
 ## Notes on pause and stop

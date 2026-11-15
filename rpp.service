@@ -8,6 +8,7 @@ User=www-data
 WorkingDirectory=/opt/RPP
 ExecStart=/opt/RPP/venv/bin/python3 /opt/RPP/rpp.py
 Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

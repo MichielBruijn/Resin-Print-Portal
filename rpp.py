@@ -1,18 +1,31 @@
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 import subprocess
 import threading
 import time
 import os
 import re
+import sys
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = 'uploads'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+IP_FILE = os.path.join(BASE_DIR, 'printer_ip.txt')
+CASSINI = [sys.executable, os.path.join(BASE_DIR, 'cassini.py')]
+ALLOWED_EXTENSIONS = ('.ctb', '.goo')
+# IP address or hostname; must not start with '-' (would be parsed as an option)
+HOST_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9.\-]{0,252}$')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+def upload_path(filename):
+    """Path inside uploads/ for a client-supplied name, or None if unsafe."""
+    if not filename or secure_filename(filename) != filename:
+        return None
+    return os.path.join(UPLOAD_FOLDER, filename)
 
 @app.route('/')
 def index():
@@ -21,19 +34,14 @@ def index():
 
 @app.route('/get-printer-ip', methods=['GET'])
 def get_printer_ip():
-    try:
-        with open('printer_ip.txt', 'r') as file:
-            ip = file.read().strip()
-            print(f"Printer IP read: {ip}", flush=True)
-            return jsonify({'ip': ip})
-    except Exception as e:
-        print(f"Error reading printer IP: {e}", flush=True)
-        return jsonify({'error': str(e)})
+    return jsonify({'ip': read_printer_ip() or ''})
 
 def read_printer_ip():
     try:
-        with open('printer_ip.txt', 'r') as file:
-            return file.read().strip()
+        with open(IP_FILE, 'r') as file:
+            return file.read().strip() or None
+    except FileNotFoundError:
+        return None
     except Exception as e:
         print(f"Error reading printer IP: {e}", flush=True)
         return None
@@ -41,10 +49,12 @@ def read_printer_ip():
 @app.route('/set-printer-ip', methods=['POST'])
 def set_printer_ip():
     try:
-        new_ip = request.json.get('ip')
+        new_ip = ((request.get_json(silent=True) or {}).get('ip') or '').strip()
+        if not HOST_RE.match(new_ip):
+            return jsonify({'error': 'Invalid IP address or hostname.'})
         print(f"Updating printer IP to: {new_ip}", flush=True)
-        with open('printer_ip.txt', 'w') as file:
-            file.write(new_ip)
+        with open(IP_FILE, 'w') as file:
+            file.write(new_ip + '\n')
         print("Printer IP updated successfully.", flush=True)
         return jsonify({'message': 'IP updated'})
     except Exception as e:
@@ -55,10 +65,10 @@ def set_printer_ip():
 def print_status():
     printer_ip = read_printer_ip()
     if printer_ip is None:
-        return jsonify({'error': 'Could not read printer IP address.'})
+        return jsonify({'status': 'No printer address configured.', 'progress': 0, 'is_online': False})
 
     try:
-        cmd = ['./cassini.py', '-p', printer_ip, 'status']
+        cmd = CASSINI + ['-p', printer_ip, 'status']
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         output = result.stdout.strip()
 
@@ -88,13 +98,15 @@ def print_status():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    file = request.files['file']
-    if file:
+    file = request.files.get('file')
+    if file and file.filename:
         filename = secure_filename(file.filename)
+        if not filename.lower().endswith(ALLOWED_EXTENSIONS):
+            return jsonify({'error': 'Only .ctb and .goo files are allowed.'}), 400
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         return jsonify({'message': 'File uploaded successfully', 'filename': filename})
-    return jsonify({'error': 'No file'})
+    return jsonify({'error': 'No file'}), 400
 
 
 @app.route('/files')
@@ -108,6 +120,7 @@ def list_files():
     return jsonify(files_info)
 
 
+UPLOAD_TIMEOUT = 900
 progress_status = {}
 print_lock = threading.Lock()
 
@@ -117,10 +130,11 @@ def upload_and_print(printer_ip, filepath, filename):
 
     try:
         # Single command: upload AND start printing over one MQTT connection
-        cmd = ['./cassini.py', '--printer', printer_ip, 'upload', '--start-printing', filepath]
+        cmd = CASSINI + ['--printer', printer_ip, 'upload', '--start-printing', filepath]
         print(f"Running: {cmd}", flush=True)
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        # Large files over the printer's WiFi can take several minutes
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=UPLOAD_TIMEOUT)
         print(f"stdout: {result.stdout}", flush=True)
         if result.stderr:
             print(f"stderr: {result.stderr}", flush=True)
@@ -130,14 +144,13 @@ def upload_and_print(printer_ip, filepath, filename):
             print(f"Upload+print completed successfully for {filename}", flush=True)
 
     except subprocess.TimeoutExpired:
-        print(f"Command timed out after 120s for {filename}", flush=True)
+        print(f"Command timed out after {UPLOAD_TIMEOUT}s for {filename}", flush=True)
     except Exception as e:
         print(f"Error: {e}", flush=True)
 
     progress_status[filename] = 100
     # Clean up after a delay to avoid memory leak
     def cleanup():
-        import time
         time.sleep(10)
         progress_status.pop(filename, None)
     threading.Thread(target=cleanup, daemon=True).start()
@@ -159,10 +172,10 @@ def print_file():
     if printer_ip is None:
         return jsonify({'error': 'Could not read printer IP address.'})
 
-    filename = request.json.get('filename')
-    if not filename:
-        return jsonify({'error': 'No filename provided.'})
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    filename = (request.get_json(silent=True) or {}).get('filename')
+    filepath = upload_path(filename)
+    if filepath is None:
+        return jsonify({'error': 'Invalid filename.'})
 
     if not os.path.exists(filepath):
         return jsonify({'error': f'File {filename} not found.'})
@@ -182,7 +195,7 @@ def _run_print_control(command):
     if printer_ip is None:
         return jsonify({'error': 'Could not read printer IP address.'})
     try:
-        cmd = ['./cassini.py', '-p', printer_ip, command]
+        cmd = CASSINI + ['-p', printer_ip, command]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
             return jsonify({'message': f'{command} successful'})
@@ -208,10 +221,10 @@ def resume_print():
 
 @app.route('/delete-file', methods=['POST'])
 def delete_file():
-    filename = request.json.get('filename')
-    if not filename:
-        return jsonify({'error': 'No filename provided.'})
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    filename = (request.get_json(silent=True) or {}).get('filename')
+    filepath = upload_path(filename)
+    if filepath is None:
+        return jsonify({'error': 'Invalid filename.'})
 
     try:
         os.remove(filepath)
@@ -220,4 +233,5 @@ def delete_file():
         return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001, host='0.0.0.0')
+    # Never debug=True here: the Werkzeug debugger allows code execution from the LAN
+    app.run(debug=False, port=5001, host='0.0.0.0')

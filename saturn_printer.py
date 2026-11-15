@@ -82,7 +82,7 @@ class SaturnPrinter:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         with sock:
             sock.settimeout(timeout)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, timeout)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             sock.sendto(b'M99999', (broadcast, SATURN_UDP_PORT))
 
             now = time.time()
@@ -101,9 +101,8 @@ class SaturnPrinter:
     # Find a specific printer at the given address, return a SaturnPrinter object
     # or None if no response is obtained
     def find_printer(addr, timeout=5):
-        import socket as _socket
         try:
-            resolved = _socket.getaddrinfo(addr, None)[0][4][0]
+            resolved = socket.getaddrinfo(addr, None, socket.AF_INET)[0][4][0]
         except Exception:
             resolved = addr
         printers = SaturnPrinter.find_printers(broadcast=resolved)
@@ -116,7 +115,7 @@ class SaturnPrinter:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         with sock:
             sock.settimeout(timeout)
-            sock.sendto(b'M99999', (self.addr, SATURN_UDP_PORT))
+            sock.sendto(b'M99999', (self.addr[0], SATURN_UDP_PORT))
             try:
                 data, addr = sock.recvfrom(1024)
             except socket.timeout:
@@ -168,8 +167,12 @@ class SaturnPrinter:
             await self.upload_file_inner(filename, start_printing)
         except Exception as ex:
             logging.error(f"Exception during upload: {ex}")
-            self.file_transfer_future.set_result((-1, -1, filename))
-            self.file_transfer_future = asyncio.get_running_loop().create_future()
+            fut = self.file_transfer_future
+            if fut is not None and not fut.done():
+                fut.set_result((-1, -1, filename))
+            else:
+                # Upload already finished (e.g. START_PRINTING failed): fail loudly
+                raise
 
     async def upload_file_inner(self, filename, start_printing=False):
         # schedule a future that can be used for status, in case this is kicked off as a task
