@@ -12,6 +12,7 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 - Pause, Resume and Stop a running print
 - Printer online/offline status indicator
 - Configure printer IP address or hostname via the web UI
+- **Mix resin**: pump the platform up and down (no exposure) to stir the resin in the vat
 
 ## File overview
 
@@ -28,7 +29,8 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder (other extensions are rejected) |
 | `/files` | GET | Lists all files in `uploads/` with their size in MB |
 | `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print |
-| `/progress/<filename>` | GET | Returns upload/transfer progress for a running print job (0–100) |
+| `/progress/<filename>` | GET | Returns upload/transfer progress for a running print job (0–100), plus `error` if sending failed |
+| `/mix` | POST | Generates a resin-mixing file (`cycles`, `stroke` in mm) and sends it to the printer |
 | `/stop-print` | POST | Sends a stop command to the printer via Cassini |
 | `/pause-print` | POST | Sends a pause command to the printer via Cassini |
 | `/resume-print` | POST | Sends a resume command to the printer via Cassini |
@@ -88,6 +90,20 @@ Implements the Elegoo SDCP protocol. Originally part of Cassini.
 
 ---
 
+### `goo_file.py` — .goo writer and resin mixing
+
+Minimal reader/writer for Elegoo's `.goo` (V3.0) slice format, and `build_mix(cycles, stroke)`, which generates the file behind the **Mix** button:
+
+- every layer is fully black and the LED power is 0, so nothing is exposed;
+- every layer has the same Z (0.01 mm), so the platform returns to the vat floor each cycle;
+- per cycle the platform lifts `stroke` mm and comes back down: the first/last 1 mm near the FEP at 150 mm/min, the rest at 500 mm/min.
+
+The header values are for the **ELEGOO Mars 4 Ultra** (`MARS4_ULTRA`). Other printers need their own resolution and display size there. The generated file is stored in `uploads/.generated/` (hidden from the file list) and sent to the printer as `rpp_mix.goo`.
+
+Tip: keep the stroke below the resin depth, or the platform leaves the resin and folds air bubbles in.
+
+---
+
 ### `simple_mqtt_server.py` — Embedded MQTT broker
 
 A minimal MQTT broker written from scratch using Python asyncio. The Elegoo printer requires an MQTT connection to receive commands — this server provides that without needing an external broker like Mosquitto.
@@ -108,7 +124,7 @@ Computes MD5 and file size when a route is registered — these are sent to the 
 
 Single-page HTML interface with two cards:
 
-- **Printer card:** shows online/offline status, the configured IP (editable), current print status text, a progress bar, and Pause/Resume/Stop buttons (visible only during an active print).
+- **Printer card:** shows online/offline status, the configured IP (editable), current print status text, a progress bar, Pause/Resume/Stop buttons (visible only during an active print) and the Mix resin panel (visible when the printer is idle).
 - **Files card:** table of uploaded files with name and size. Buttons to Upload, Print, and Delete.
 
 ---

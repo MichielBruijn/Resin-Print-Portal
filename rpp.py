@@ -6,6 +6,7 @@ import time
 import os
 import re
 import sys
+import goo_file
 
 app = Flask(__name__)
 
@@ -122,7 +123,14 @@ def list_files():
 
 UPLOAD_TIMEOUT = 900
 progress_status = {}
+job_errors = {}
 print_lock = threading.Lock()
+
+
+def _cassini_error(stderr, default):
+    """Last 'ERROR: ...' message from cassini's log output."""
+    lines = [l for l in stderr.strip().splitlines() if 'ERROR' in l]
+    return lines[-1].split('ERROR:')[-1].strip() if lines else default
 
 def upload_and_print(printer_ip, filepath, filename):
     """Upload file to printer and start printing in one MQTT session."""
@@ -140,30 +148,38 @@ def upload_and_print(printer_ip, filepath, filename):
             print(f"stderr: {result.stderr}", flush=True)
         if result.returncode != 0:
             print(f"Exit code: {result.returncode}", flush=True)
+            job_errors[filename] = _cassini_error(result.stderr, 'Sending to printer failed')
         else:
             print(f"Upload+print completed successfully for {filename}", flush=True)
 
     except subprocess.TimeoutExpired:
         print(f"Command timed out after {UPLOAD_TIMEOUT}s for {filename}", flush=True)
+        job_errors[filename] = 'Sending to printer timed out.'
     except Exception as e:
         print(f"Error: {e}", flush=True)
+        job_errors[filename] = str(e)
 
     progress_status[filename] = 100
     # Clean up after a delay to avoid memory leak
     def cleanup():
         time.sleep(10)
         progress_status.pop(filename, None)
+        job_errors.pop(filename, None)
     threading.Thread(target=cleanup, daemon=True).start()
 
 def run_print_job(printer_ip, filepath, filename):
     """Wrapper that holds the print lock during the entire job."""
     with print_lock:
+        job_errors.pop(filename, None)
         progress_status[filename] = 50
         upload_and_print(printer_ip, filepath, filename)
 
 @app.route('/progress/<filename>')
 def get_progress(filename):
-    return jsonify({'progress': progress_status.get(filename, 0)})
+    resp = {'progress': progress_status.get(filename, 0)}
+    if filename in job_errors:
+        resp['error'] = job_errors[filename]
+    return jsonify(resp)
 
 
 @app.route('/print-file', methods=['POST'])
@@ -190,6 +206,37 @@ def print_file():
     return jsonify({'message': f'Uploading and printing {filename}...'})
 
 
+MIX_DIR = os.path.join(UPLOAD_FOLDER, '.generated')  # hidden from /files
+MIX_NAME = 'rpp_mix.goo'
+
+
+@app.route('/mix', methods=['POST'])
+def mix_resin():
+    """Generate a no-exposure pump file and send it to the printer."""
+    printer_ip = read_printer_ip()
+    if printer_ip is None:
+        return jsonify({'error': 'Could not read printer IP address.'})
+    data = request.get_json(silent=True) or {}
+    try:
+        cycles = int(data.get('cycles', 60))
+        stroke = float(data.get('stroke', 15))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid cycles or stroke.'})
+    if not (1 <= cycles <= 500 and 2 <= stroke <= 40):
+        return jsonify({'error': 'Cycles must be 1-500 and stroke 2-40 mm.'})
+    if print_lock.locked():
+        return jsonify({'error': 'A print job is already in progress. Please wait.'})
+
+    os.makedirs(MIX_DIR, exist_ok=True)
+    filepath = os.path.join(MIX_DIR, MIX_NAME)
+    with open(filepath, 'wb') as f:
+        f.write(goo_file.build_mix(cycles, stroke))
+
+    print(f"Mixing: {cycles} cycles, {stroke} mm", flush=True)
+    threading.Thread(target=run_print_job, args=(printer_ip, filepath, MIX_NAME)).start()
+    return jsonify({'message': f'Mixing: {cycles} x {stroke:g} mm', 'filename': MIX_NAME})
+
+
 def _run_print_control(command):
     printer_ip = read_printer_ip()
     if printer_ip is None:
@@ -199,9 +246,7 @@ def _run_print_control(command):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
             return jsonify({'message': f'{command} successful'})
-        error_lines = [l for l in result.stderr.strip().splitlines() if 'ERROR' in l]
-        error_msg = error_lines[-1].split('ERROR:')[-1].strip() if error_lines else f'{command} failed'
-        return jsonify({'error': error_msg})
+        return jsonify({'error': _cassini_error(result.stderr, f'{command} failed')})
     except subprocess.TimeoutExpired:
         return jsonify({'error': 'Request timed out.'})
     except Exception as e:
