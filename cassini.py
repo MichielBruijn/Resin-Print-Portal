@@ -51,6 +51,10 @@ async def create_http_server():
     http_server_task = asyncio.create_task(http.serve_forever())
     return http, http.port, http_server_task
 
+def fmt_ms(ms):
+    s = int(ms) // 1000
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
+
 def do_status(printers):
     for i, p in enumerate(printers):
         attrs = p.desc['Data']['Attributes']
@@ -62,6 +66,8 @@ def do_status(printers):
         print(f"    Machine Status: {CurrentStatus(status['CurrentStatus']).name}")
         print(f"    Print Status: {PrintInfoStatus(print_info['Status']).name}")
         print(f"    Layers: {print_info['CurrentLayer']}/{print_info['TotalLayer']}")
+        if print_info.get('TotalTicks'):  # milliseconds; total is the printer's own estimate
+            print(f"    Time: {fmt_ms(print_info['CurrentTicks'])} / {fmt_ms(print_info['TotalTicks'])}")
         print(f"    File: {print_info['Filename']}")
         print(f"    File Transfer Status: {FileStatus(file_info['Status']).name}")
 

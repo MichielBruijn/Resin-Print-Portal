@@ -217,6 +217,19 @@ body {
     color: var(--text);
 }
 
+.time-info {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    font-size: 0.875rem;
+    color: var(--muted);
+}
+
+.time-info strong {
+    color: var(--text);
+}
+
 /* === File table === */
 .table-wrapper {
     overflow-y: auto;

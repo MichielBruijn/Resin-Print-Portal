@@ -8,7 +8,7 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 
 - Upload `.ctb` / `.goo` slice files to the server
 - Send files to the printer and start printing in one step
-- Real-time print progress (layer counter + progress bar)
+- Real-time print progress (layer counter + progress bar) with elapsed time, remaining time and expected finish time
 - Pause, Resume and Stop a running print
 - Printer online/offline status indicator
 - Configure printer IP address or hostname via the web UI
@@ -25,7 +25,7 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | `/` | GET | Serves the web interface (`index.html`) |
 | `/get-printer-ip` | GET | Returns the currently configured printer IP |
 | `/set-printer-ip` | POST | Saves a new printer IP to `printer_ip.txt` |
-| `/print-status` | GET | Polls the printer status via Cassini and returns JSON with current layer, total layers, progress %, and online state |
+| `/print-status` | GET | Polls the printer status via Cassini and returns JSON with current layer, total layers, progress %, elapsed/remaining seconds and online state |
 | `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder (other extensions are rejected) |
 | `/files` | GET | Lists all files in `uploads/` with their size in MB and upload time, newest first |
 | `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print |
@@ -55,7 +55,7 @@ A CLI tool (also imported by `rpp.py`) that handles all communication with the p
 
 | Command | Description |
 |---|---|
-| `status` | Show current machine status, print progress, and layer count |
+| `status` | Show current machine status, print progress, layer count and elapsed/total time |
 | `status-full` | Show the full raw JSON response from the printer |
 | `watch` | Continuously poll and display print progress |
 | `upload <file>` | Upload a `.ctb`/`.goo` file to the printer |
@@ -79,6 +79,8 @@ Implements the Elegoo SDCP protocol. Originally part of Cassini.
 - **Commands:** encodes and sends JSON commands over MQTT topics `/sdcp/request/<id>` and reads replies from `/sdcp/response/<id>` and `/sdcp/status/<id>`.
 - **File upload:** registers the file on the built-in HTTP server, sends an `UPLOAD_FILE` command with the URL and MD5 checksum, then monitors download progress via status messages.
 - **Print control:** implements `stop_print()`, `pause_print()`, `resume_print()`, and `print_file()` with correct handling of all pause states (see table below).
+
+The printer reports `CurrentTicks` / `TotalTicks` in milliseconds; `TotalTicks` is the printer's own estimate of the total print time and is updated while printing.
 
 **Status enums used by the printer:**
 
