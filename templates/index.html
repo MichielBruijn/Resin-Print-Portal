@@ -57,6 +57,7 @@
       <table class="file-list" id="file-list">
         <thead>
           <tr>
+            <th class="thumb-col"></th>
             <th>Name</th>
             <th>Uploaded</th>
             <th>Size</th>
@@ -64,6 +65,11 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+    <div class="file-preview" id="file-preview" style="display:none;">
+      <img id="file-preview-img" alt="" onload="this.parentElement.style.display='flex'"
+           onerror="this.parentElement.style.display='none'">
+      <div class="file-preview-name" id="file-preview-name"></div>
     </div>
     <div class="action-buttons">
       <button class="btn btn-upload" onclick="uploadFile()">&#8679; Upload</button>
