@@ -11,6 +11,7 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 - Real-time print progress (layer counter + progress bar) with elapsed time, remaining time and expected finish time
 - Pause, Resume and Stop a running print
 - Printer online/offline status indicator
+- Preview image of the model being printed (from the slice file, like on the printer's screen)
 - Configure printer IP address or hostname via the web UI
 - **Mix resin**: pump the platform up and down (no exposure) to stir the resin in the vat
 
@@ -29,6 +30,7 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder (other extensions are rejected) |
 | `/files` | GET | Lists all files in `uploads/` with their size in MB and upload time, newest first |
 | `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print |
+| `/preview/<filename>` | GET | PNG of the slicer preview inside an uploaded `.ctb`/`.goo`, 404 if it has none |
 | `/progress/<filename>` | GET | Returns upload/transfer progress for a running print job (0–100), plus `error` if sending failed |
 | `/mix` | POST | Generates a resin-mixing file (`cycles`, `stroke` in mm) and sends it to the printer |
 | `/stop-print` | POST | Sends a stop command to the printer via Cassini |
@@ -103,6 +105,17 @@ Minimal reader/writer for Elegoo's `.goo` (V3.0) slice format, and `build_mix(cy
 The header values are for the **ELEGOO Mars 4 Ultra** (`MARS4_ULTRA`). Other printers need their own resolution and display size there. The generated file is stored in `uploads/.generated/` (hidden from the file list) and sent to the printer as `rpp_mix.goo`.
 
 Tip: keep the stroke below the resin depth, or the platform leaves the resin and folds air bubbles in.
+
+---
+
+### `preview.py` — Preview images
+
+Extracts the slicer's preview image from a slice file and returns it as PNG (no image libraries needed):
+
+- **`.ctb`**: the preview headers are not encrypted, even in encrypted CTB v4/v5 files, so they are located near the start of the file; the largest image is decoded from ChituBox's RLE-compressed RGB555.
+- **`.goo`**: the 290×290 RGB565 preview from the header.
+
+Results are cached per file version. The printer card shows the preview of the file being printed, if that file was uploaded through RPP.
 
 ---
 

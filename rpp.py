@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 import subprocess
 import threading
@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import goo_file
+import preview
 
 app = Flask(__name__)
 
@@ -92,7 +93,9 @@ def print_status():
             elapsed_s = t[0] * 3600 + t[1] * 60 + t[2]
             remaining_s = max(t[3] * 3600 + t[4] * 60 + t[5] - elapsed_s, 0)
 
+        fmatch = re.search(r'File: (.+)', output)
         return jsonify({
+            'file': fmatch.group(1).strip() if fmatch else None,
             'elapsed_s': elapsed_s,
             'remaining_s': remaining_s,
             'status': output,
@@ -184,6 +187,16 @@ def run_print_job(printer_ip, filepath, filename):
         job_errors.pop(filename, None)
         progress_status[filename] = 50
         upload_and_print(printer_ip, filepath, filename)
+
+@app.route('/preview/<filename>')
+def get_preview(filename):
+    """Slicer preview image of an uploaded file (PNG), 404 if there is none."""
+    filepath = upload_path(filename)
+    png = preview.preview_png(filepath) if filepath else None
+    if png is None:
+        return Response(status=404)
+    return Response(png, mimetype='image/png', headers={'Cache-Control': 'max-age=300'})
+
 
 @app.route('/progress/<filename>')
 def get_progress(filename):

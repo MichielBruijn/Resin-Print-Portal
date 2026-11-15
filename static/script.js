@@ -232,6 +232,16 @@ function fetchPrintStatus() {
             if (hint) hint.style.display = needsConfirm ? 'block' : 'none';
             const btnMix = document.getElementById('btn-mix');
             if (btnMix) btnMix.disabled = needsConfirm;
+            // Slicer preview of the file on the printer (if it was uploaded through RPP)
+            const img = document.getElementById('print-preview');
+            if (img) {
+                const want = (data.is_online && data.file) ? '/preview/' + encodeURIComponent(data.file) : '';
+                if (img.dataset.src !== want) {
+                    img.dataset.src = want;
+                    img.style.display = 'none';
+                    if (want) img.src = want; else img.removeAttribute('src');
+                }
+            }
             const timeInfo = document.getElementById('time-info');
             if (timeInfo) {
                 const showTime = (isBusy || isPaused) && data.remaining_s != null;

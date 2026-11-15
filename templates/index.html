@@ -24,7 +24,11 @@
         <button onclick="saveIP()" class="btn btn-save">Save</button>
       </div>
     </div>
-    <div id="status" class="status-text">Loading...</div>
+    <div class="status-row">
+      <div id="status" class="status-text">Loading...</div>
+      <img id="print-preview" class="print-preview" alt="" style="display:none;"
+           onload="this.style.display='block'" onerror="this.style.display='none'">
+    </div>
     <div id="confirm-hint" class="confirm-hint" style="display:none;">Print finished &mdash; confirm the screen on the printer before starting a new job.</div>
     <div class="progress-container">
       <div class="progress-bar" id="progress-bar"></div>
