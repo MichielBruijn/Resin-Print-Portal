@@ -224,7 +224,7 @@ function fetchPrintStatus() {
             const isPausedLifted = !isPausedHW && data.is_online && data.status && data.status.includes('PAUSED_LIFTED');
             const isPaused = isPausedHW || isPausedLifted;
             // After a job the printer stays BUSY with COMPLETE/STOPPED: not active
-            const isDone = data.status && /Print Status: (COMPLETE|STOPPED|IDLE)/.test(data.status);
+            const isDone = data.status && /Print Status: (COMPLETE|STOPPED|CANCELED|IDLE)/.test(data.status);
             const isBusy = data.is_online && data.status && data.status.includes('BUSY') && !isDone;
             // Printer keeps BUSY until its 'print complete' screen is confirmed
             const needsConfirm = data.is_online && isDone && data.status.includes('BUSY');
@@ -235,7 +235,8 @@ function fetchPrintStatus() {
             // Slicer preview of the file on the printer (if it was uploaded through RPP)
             const img = document.getElementById('print-preview');
             if (img) {
-                const want = (data.is_online && data.file) ? '/preview/' + encodeURIComponent(data.file) : '';
+                const jobShown = isBusy || isPaused || needsConfirm;  // printer still shows this job
+                const want = (data.is_online && data.file && jobShown) ? '/preview/' + encodeURIComponent(data.file) : '';
                 if (img.dataset.src !== want) {
                     img.dataset.src = want;
                     img.style.display = 'none';

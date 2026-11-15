@@ -89,7 +89,7 @@ The printer reports `CurrentTicks` / `TotalTicks` in milliseconds; `TotalTicks` 
 | Enum | Values |
 |---|---|
 | `CurrentStatus` | READY (0), BUSY (1) |
-| `PrintInfoStatus` | IDLE, PRINTING, EXPOSURE, RETRACTING, LOWERING, PAUSED_HW (7), PAUSED_LIFTED (8), STOPPING, STOPPED, PAUSED (14), COMPLETE (16) |
+| `PrintInfoStatus` | IDLE, PRINTING, EXPOSURE, RETRACTING, LOWERING, PAUSED_HW (7), PAUSED_LIFTED (8), STOPPING, STOPPED, CANCELED (14), COMPLETE (16) |
 | `FileStatus` | NONE, DONE, ERROR |
 
 ---
@@ -255,15 +255,15 @@ This cannot be done remotely: on firmware V1.3.0 (protocol V1.0.0) a Stop comman
 
 ## Notes on pause and stop
 
-The Elegoo SDCP protocol has three distinct paused states:
+The Elegoo SDCP protocol has two paused states, plus a state that upstream Cassini called PAUSED but that actually means the print was stopped:
 
 | State | Cause | How to resume |
 |---|---|---|
 | PAUSED_LIFTED (8) | RPP Pause button | RPP Resume button |
 | PAUSED_HW (7) | Pause via printer touchscreen | RPP Resume button or printer display |
-| PAUSED (14) | RPP Stop button | Print is abandoned — start a new one |
+| CANCELED (14) | Stop (RPP or touchscreen) | Print is abandoned — start a new one |
 
-Pressing **Stop** in RPP sends a stop command and the printer ends the current print. The printer firmware briefly reports state 14 before returning to idle.
+Pressing **Stop** in RPP sends a stop command and the printer ends the current print. Afterwards the printer reports `Machine Status: READY` with state 14 (shown as CANCELED in RPP); the progress bar goes back to 0.
 
 ## Credits
 
