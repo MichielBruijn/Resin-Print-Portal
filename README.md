@@ -27,7 +27,7 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | `/set-printer-ip` | POST | Saves a new printer IP to `printer_ip.txt` |
 | `/print-status` | GET | Polls the printer status via Cassini and returns JSON with current layer, total layers, progress %, and online state |
 | `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder (other extensions are rejected) |
-| `/files` | GET | Lists all files in `uploads/` with their size in MB |
+| `/files` | GET | Lists all files in `uploads/` with their size in MB and upload time, newest first |
 | `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print |
 | `/progress/<filename>` | GET | Returns upload/transfer progress for a running print job (0–100), plus `error` if sending failed |
 | `/mix` | POST | Generates a resin-mixing file (`cycles`, `stroke` in mm) and sends it to the printer |
@@ -125,7 +125,7 @@ Computes MD5 and file size when a route is registered — these are sent to the 
 Single-page HTML interface with two cards:
 
 - **Printer card:** shows online/offline status, the configured IP (editable), current print status text, a progress bar, Pause/Resume/Stop buttons (visible only during an active print) and the Mix resin panel (visible when the printer is idle).
-- **Files card:** table of uploaded files with name and size. Buttons to Upload, Print, and Delete.
+- **Files card:** table of uploaded files with name, upload date/time and size (newest first). Buttons to Upload, Print, and Delete.
 
 ---
 

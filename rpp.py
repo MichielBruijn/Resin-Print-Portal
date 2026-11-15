@@ -116,8 +116,10 @@ def list_files():
     files_info = []
     for file in files:
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], file)
-        size = os.path.getsize(filepath) / (1024 * 1024)  # Convert to MB
-        files_info.append({'name': file, 'size': round(size, 2)})
+        st = os.stat(filepath)
+        files_info.append({'name': file, 'size': round(st.st_size / (1024 * 1024), 2),
+                           'uploaded': int(st.st_mtime)})  # upload time, epoch seconds
+    files_info.sort(key=lambda f: f['uploaded'], reverse=True)  # newest first
     return jsonify(files_info)
 
 
