@@ -35,12 +35,12 @@ function saveIP() {
         .then(response => response.json())
         .then(data => {
             if (data.message) {
-                alert('Printer address saved!');
+                notify('Printer address saved.');
                 ipField.readOnly = true;
                 saveBtn.style.display = 'none';
             } else {
                 console.error('Error saving IP:', data.error);
-                alert('Error saving: ' + data.error);
+                notify('Error saving: ' + data.error, true);
             }
         });
 }
@@ -86,19 +86,19 @@ function uploadFile() {
             if (xhr.status === 200) {
                 updateLoadingPercentage(100); // Complete, set progress to 100%
                 hideLoadingIndicator();
-                alert('Upload complete!');
+                notify('Upload complete.');
                 fetchFiles(); // Refresh list after upload
             } else {
                 hideLoadingIndicator();
                 let msg = 'An error occurred during the upload.';
                 try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
-                alert(msg);
+                notify(msg, true);
             }
         };
 
         xhr.onerror = function () {
             hideLoadingIndicator();
-            alert('An error occurred during the upload.');
+            notify('An error occurred during the upload.', true);
         };
 
         xhr.send(formData);
@@ -120,11 +120,11 @@ function printSelectedFile() {
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    alert(data.error);
+                    notify(data.error, true);
                     hideLoadingIndicator();
                 } else {
                     checkProgress(selectedFile); // Start polling for progress
-                    alert(data.message);
+                    notify(data.message);
                 }
             })
             .catch(error => {
@@ -132,7 +132,7 @@ function printSelectedFile() {
                 console.error('Error:', error);
             });
     } else {
-        alert("Please select a file first.");
+        notify('Please select a file first.', true);
     }
 }
 
@@ -184,7 +184,7 @@ function checkProgress(filename) {
             updatePrintProgress(data.progress);
             if (data.error) {
                 hideLoadingIndicator();
-                alert('Error: ' + data.error);
+                notify('Error: ' + data.error, true);
                 return;
             }
             if (data.progress < 100) {
@@ -285,10 +285,10 @@ function updateMixEstimate() {
     document.getElementById('mix-estimate').textContent = `≈ ${Math.max(1, Math.round(perCycle * cycles / 60))} min`;
 }
 
-function startMix() {
+async function startMix() {
     const cycles = parseInt(document.getElementById('mix-cycles').value);
     const stroke = parseFloat(document.getElementById('mix-stroke').value);
-    if (!confirm(`Mix resin: ${cycles} cycles of ${stroke} mm?`)) return;
+    if (!await askConfirm(`Mix resin: ${cycles} cycles of ${stroke} mm?`, 'Mix')) return;
     showLoadingIndicator('Preparing mix...');
     fetch('/mix', {
         method: 'POST',
@@ -299,7 +299,7 @@ function startMix() {
         .then(data => {
             if (data.error) {
                 hideLoadingIndicator();
-                alert(data.error);
+                notify(data.error, true);
             } else {
                 checkProgress(data.filename);
             }
@@ -310,12 +310,12 @@ function startMix() {
         });
 }
 
-function stopPrint() {
-    if (!confirm('Stop the current print?')) return;
+async function stopPrint() {
+    if (!await askConfirm('Stop the current print?', 'Stop', true)) return;
     fetch('/stop-print', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
-            if (data.error) alert('Error: ' + data.error);
+            if (data.error) notify('Error: ' + data.error, true);
             else fetchPrintStatus();
         });
 }
@@ -324,7 +324,7 @@ function pausePrint() {
     fetch('/pause-print', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
-            if (data.error) alert('Error: ' + data.error);
+            if (data.error) notify('Error: ' + data.error, true);
             else fetchPrintStatus();
         });
 }
@@ -333,7 +333,7 @@ function resumePrint() {
     fetch('/resume-print', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
-            if (data.error) alert('Error: ' + data.error);
+            if (data.error) notify('Error: ' + data.error, true);
             else fetchPrintStatus();
         });
 }
@@ -392,26 +392,87 @@ function selectFile(filename) {
     }
 }
 
-function deleteSelectedFile() {
-    if (selectedFile) {
-        if (!confirm(`Are you sure you want to delete ${selectedFile}?`)) return;
-
-        fetch('/delete-file', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ filename: selectedFile }),
-        })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message || ('Error: ' + data.error));
-                if (data.message) selectedFile = null;
-                fetchFiles();
-            })
-            .catch(error => console.error('Error:', error));
+async function deleteSelectedFile() {
+    if (!selectedFile) {
+        notify('Please select a file first.', true);
+        return;
     }
+    const filename = selectedFile;
+    if (!await askConfirm(`Delete ${filename}?`, 'Delete', true)) return;
+
+    fetch('/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: filename }),
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                notify(data.message);
+                selectedFile = null;
+            } else {
+                notify('Error: ' + data.error, true);
+            }
+            fetchFiles();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            notify('Could not reach the server.', true);
+        });
 }
 
 // Automatically update status every 5 seconds
 setInterval(fetchPrintStatus, 5000);
+// In-page notifications and confirmations: browsers can silently block
+// alert()/confirm() ("Don't allow this page to prompt again").
+function notify(message, isError = false) {
+    let box = document.getElementById('toasts');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'toasts';
+        document.body.appendChild(box);
+    }
+    const t = document.createElement('div');
+    t.className = 'toast' + (isError ? ' toast-error' : '');
+    t.textContent = message;
+    t.onclick = () => t.remove();
+    box.appendChild(t);
+    setTimeout(() => t.remove(), isError ? 8000 : 4000);
+}
+
+function askConfirm(message, okLabel = 'OK', danger = false) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        const box = document.createElement('div');
+        box.className = 'modal';
+        const p = document.createElement('p');
+        p.textContent = message;
+        const row = document.createElement('div');
+        row.className = 'modal-buttons';
+        const cancel = document.createElement('button');
+        cancel.className = 'btn btn-cancel';
+        cancel.textContent = 'Cancel';
+        const ok = document.createElement('button');
+        ok.className = 'btn ' + (danger ? 'btn-delete' : 'btn-print');
+        ok.textContent = okLabel;
+        row.append(cancel, ok);
+        box.append(p, row);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        ok.focus();
+        const close = result => {
+            document.removeEventListener('keydown', onKey);
+            overlay.remove();
+            resolve(result);
+        };
+        const onKey = e => {
+            if (e.key === 'Escape') close(false);
+            if (e.key === 'Enter') close(true);
+        };
+        document.addEventListener('keydown', onKey);
+        cancel.onclick = () => close(false);
+        ok.onclick = () => close(true);
+        overlay.onclick = e => { if (e.target === overlay) close(false); };
+    });
+}
