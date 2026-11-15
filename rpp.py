@@ -85,7 +85,16 @@ def print_status():
         else:
             current_layer, total_layers, progress = 'N/A', 'N/A', 0
 
+        elapsed_s = remaining_s = None
+        tmatch = re.search(r'Time: (\d+):(\d\d):(\d\d) / (\d+):(\d\d):(\d\d)', output)
+        if tmatch:
+            t = [int(x) for x in tmatch.groups()]
+            elapsed_s = t[0] * 3600 + t[1] * 60 + t[2]
+            remaining_s = max(t[3] * 3600 + t[4] * 60 + t[5] - elapsed_s, 0)
+
         return jsonify({
+            'elapsed_s': elapsed_s,
+            'remaining_s': remaining_s,
             'status': output,
             'current_layer': current_layer,
             'total_layers': total_layers,

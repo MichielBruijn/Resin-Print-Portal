@@ -232,6 +232,26 @@ function fetchPrintStatus() {
             if (hint) hint.style.display = needsConfirm ? 'block' : 'none';
             const btnMix = document.getElementById('btn-mix');
             if (btnMix) btnMix.disabled = needsConfirm;
+            const timeInfo = document.getElementById('time-info');
+            if (timeInfo) {
+                const showTime = (isBusy || isPaused) && data.remaining_s != null;
+                timeInfo.style.display = showTime ? 'flex' : 'none';
+                if (showTime) {
+                    const eta = new Date(Date.now() + data.remaining_s * 1000)
+                        .toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+                    timeInfo.innerHTML = '';
+                    [['Elapsed', formatDuration(data.elapsed_s)],
+                     ['Remaining', formatDuration(data.remaining_s)],
+                     ['Ready at', isPaused ? '—' : eta]].forEach(([label, value]) => {
+                        const span = document.createElement('span');
+                        span.textContent = label + ' ';
+                        const b = document.createElement('strong');
+                        b.textContent = value;
+                        span.appendChild(b);
+                        timeInfo.appendChild(span);
+                    });
+                }
+            }
             const mixPanel = document.getElementById('mix-panel');
             if (mixPanel) mixPanel.style.display = (data.is_online && !isBusy && !isPaused) ? 'block' : 'none';
             if (controls) {
@@ -335,6 +355,12 @@ function fetchFiles() {
             console.error('Error:', error);
             document.getElementById('file-list').querySelector('tbody').innerHTML = '<tr><td colspan="3">Error loading files.</td></tr>';
         });
+}
+
+// seconds -> "1 h 05 min" / "12 min"
+function formatDuration(sec) {
+    const m = Math.round(sec / 60);
+    return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
 }
 
 // e.g. 15-11-2026 20:40
