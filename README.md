@@ -187,7 +187,7 @@ alive-progress==3.1.4
 
 ## Installation
 
-Tested on Ubuntu 24.04.
+Tested on Ubuntu 24.04 and 26.04.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MichielBruijn/Resin-Print-Portal/main/install.sh | bash
@@ -218,6 +218,25 @@ The interface runs on port **5001**. It has no authentication: only expose it on
 ```bash
 bash /opt/RPP/update.sh
 ```
+
+**Upgrading from v0.0.3 or older:** `printer_ip.txt` is no longer tracked by git, so the old `update.sh` deletes it during the pull. Run `bash /opt/RPP/update.sh` twice (the second run uses the new script and recreates the file) and enter the printer address again in the web UI. Or save it first: `cp /opt/RPP/printer_ip.txt /tmp/rpp_printer_ip.txt` — the new script restores it from there.
+
+## Mixing resin
+
+Pigments settle on the bottom of the vat. The **Mix resin** panel (shown when the printer is idle) sends a generated job that pumps the platform down to the vat floor and up again, without exposing anything:
+
+- **Cycles**: number of up/down strokes (default 60, about 6 minutes)
+- **Stroke**: how far the platform lifts, in mm (default 15)
+
+Each cycle returns the platform to the same floor position. The first and last millimetre near the FEP run at 150 mm/min to avoid suction and impact, the rest at 500 mm/min. Keep the stroke below the resin depth, or the platform leaves the resin and folds air bubbles in. Resin that has stood for weeks still needs a good shake in the bottle first.
+
+The generated file is made for the Mars 4 Ultra (see `goo_file.py`).
+
+## Notes on the "print complete" screen
+
+After every job (a print or a mix) the printer shows a completion screen and reports `Machine Status: BUSY` with `Print Status: COMPLETE` until that screen is confirmed **on the printer itself**. In that state it refuses new jobs. RPP shows a yellow hint and disables the Mix button until it is confirmed.
+
+This cannot be done remotely: on firmware V1.3.0 (protocol V1.0.0) a Stop command is acknowledged but leaves the screen, a new Start is rejected, and there is no confirm command.
 
 ## Notes on pause and stop
 
