@@ -172,6 +172,22 @@ body {
     word-break: break-word;
 }
 
+.confirm-hint {
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background-color: rgba(234, 179, 8, 0.12);
+    border: 1px solid rgba(234, 179, 8, 0.5);
+    color: #fde047;
+    font-size: 0.875rem;
+}
+
+.btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
 /* === Progress bar === */
 .progress-container {
     background-color: var(--bg);
