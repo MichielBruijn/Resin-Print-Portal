@@ -338,16 +338,35 @@ function resumePrint() {
         });
 }
 
+let fileVersions = {};  // name -> upload time, busts the preview cache on re-upload
+
+function previewUrl(name) {
+    return '/preview/' + encodeURIComponent(name) + '?v=' + (fileVersions[name] || 0);
+}
+
 function fetchFiles() {
     fetch('/files')
         .then(response => response.json())
         .then(filesInfo => {
             const tbody = document.getElementById('file-list').querySelector('tbody');
             tbody.innerHTML = '';
+            fileVersions = {};
+            filesInfo.forEach(f => { fileVersions[f.name] = f.uploaded; });
+            if (selectedFile && !(selectedFile in fileVersions)) selectedFile = null;
             filesInfo.forEach(fileInfo => {
                 const tr = document.createElement('tr');
+                tr.dataset.name = fileInfo.name;
                 if (selectedFile === fileInfo.name) tr.classList.add('selected');
                 tr.addEventListener('click', () => selectFile(fileInfo.name));
+                const tdThumb = document.createElement('td');
+                tdThumb.className = 'thumb-col';
+                const thumb = document.createElement('img');
+                thumb.className = 'thumb';
+                thumb.loading = 'lazy';
+                thumb.alt = '';
+                thumb.onerror = () => thumb.remove();
+                thumb.src = previewUrl(fileInfo.name);
+                tdThumb.appendChild(thumb);
                 const tdName = document.createElement('td');
                 tdName.textContent = fileInfo.name;
                 const tdDate = document.createElement('td');
@@ -356,15 +375,17 @@ function fetchFiles() {
                 const tdSize = document.createElement('td');
                 tdSize.className = 'file-size';
                 tdSize.textContent = fileInfo.size + ' MB';
+                tr.appendChild(tdThumb);
                 tr.appendChild(tdName);
                 tr.appendChild(tdDate);
                 tr.appendChild(tdSize);
                 tbody.appendChild(tr);
             });
+            showFilePreview();
         })
         .catch(error => {
             console.error('Error:', error);
-            document.getElementById('file-list').querySelector('tbody').innerHTML = '<tr><td colspan="3">Error loading files.</td></tr>';
+            document.getElementById('file-list').querySelector('tbody').innerHTML = '<tr><td colspan="4">Error loading files.</td></tr>';
         });
 }
 
@@ -382,13 +403,29 @@ function formatDate(epoch) {
 
 function selectFile(filename) {
     selectedFile = filename;
-    document.querySelectorAll('.file-list tr').forEach(tr => {
-        tr.classList.remove('selected');
+    document.querySelectorAll('.file-list tbody tr').forEach(tr => {
+        tr.classList.toggle('selected', tr.dataset.name === filename);
     });
-    const rows = [...document.querySelectorAll('.file-list tr')];
-    const selectedRow = rows.find(tr => tr.cells[0].textContent === filename);
-    if (selectedRow) {
-        selectedRow.classList.add('selected');
+    showFilePreview();
+}
+
+// Large preview of the selected file under the list
+function showFilePreview() {
+    const box = document.getElementById('file-preview');
+    const img = document.getElementById('file-preview-img');
+    if (!box || !img) return;
+    if (!selectedFile) {
+        box.style.display = 'none';
+        img.removeAttribute('src');
+        img.dataset.src = '';
+        return;
+    }
+    document.getElementById('file-preview-name').textContent = selectedFile;
+    const want = previewUrl(selectedFile);
+    if (img.dataset.src !== want) {
+        img.dataset.src = want;
+        box.style.display = 'none';  // shown by onload if the file has a preview
+        img.src = want;
     }
 }
 

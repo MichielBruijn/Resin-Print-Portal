@@ -140,7 +140,7 @@ Computes MD5 and file size when a route is registered — these are sent to the 
 Single-page HTML interface with two cards:
 
 - **Printer card:** shows online/offline status, the configured IP (editable), current print status text, a progress bar, Pause/Resume/Stop buttons (visible only during an active print) and the Mix resin panel (visible when the printer is idle).
-- **Files card:** table of uploaded files with name, upload date/time and size (newest first). Buttons to Upload, Print, and Delete.
+- **Files card:** table of uploaded files with a preview thumbnail, name, upload date/time and size (newest first). Selecting a file shows a large preview below the list. Buttons to Upload, Print, and Delete.
 
 ---
 
