@@ -263,6 +263,11 @@ function fetchPrintStatus() {
                     });
                 }
             }
+            if (window.setFaviconState) {
+                const fav = !data.is_online ? 'offline' : isPaused ? 'paused'
+                    : isBusy ? 'printing' : needsConfirm ? 'done' : 'idle';
+                setFaviconState(fav, data.progress);
+            }
             const mixPanel = document.getElementById('mix-panel');
             if (mixPanel) mixPanel.style.display = (data.is_online && !isBusy && !isPaused) ? 'block' : 'none';
             if (controls) {
