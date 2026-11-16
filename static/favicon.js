@@ -41,7 +41,9 @@
         const modelH = state === 'printing' || state === 'paused' || state === 'done' ? 3 + p * 15 : 0;
         let plateY = 10;
         let exposing = false;
-        if (state === 'printing') {
+        if (state === 'idle') {
+            plateY = 10 + 4 * (1 - Math.cos(frame / 30 * Math.PI * 2)) / 2;  // slow bob, 3 s
+        } else if (state === 'printing') {
             const t = (frame % 20) / 20;  // 2 s per layer at 10 fps
             const dipY = 40 - modelH - 4;  // model touches the resin
             const k = t < 0.35 ? t / 0.35 : t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
@@ -67,10 +69,18 @@
             ctx.fill();
         }
 
-        // Vat with resin
+        // Vat with resin, surface ripples unless offline
         ctx.fillStyle = col('resin');
         ctx.globalAlpha = 0.85;
-        ctx.fillRect(10, 42, 44, 10);
+        ctx.beginPath();
+        ctx.moveTo(10, 52);
+        for (let x = 10; x <= 54; x += 2) {
+            const w = off ? 0 : 1.8 * Math.sin(x / 5 + frame / 3);
+            ctx.lineTo(x, 42 + w);
+        }
+        ctx.lineTo(54, 52);
+        ctx.closePath();
+        ctx.fill();
         ctx.globalAlpha = 1;
         ctx.strokeStyle = col('metal');
         ctx.lineWidth = 2.5;
@@ -142,8 +152,7 @@
         state = newState;
         clearInterval(timer);
         timer = null;
-        const animated = state === 'printing' || state === 'paused' || state === 'done';
-        if (animated) timer = setInterval(draw, 100);
+        if (state !== 'offline') timer = setInterval(draw, 100);
         draw();
     };
 
