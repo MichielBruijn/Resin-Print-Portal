@@ -29,10 +29,10 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | `/print-status` | GET | Polls the printer status via Cassini and returns JSON with current layer, total layers, progress %, elapsed/remaining seconds and online state |
 | `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder (other extensions are rejected) |
 | `/files` | GET | Lists all files in `uploads/` with their size in MB and upload time, newest first |
-| `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print |
+| `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print; with `mix: {cycles, stroke}` it mixes first |
 | `/preview/<filename>` | GET | PNG of the slicer preview inside an uploaded `.ctb`/`.goo`, 404 if it has none |
 | `/progress/<filename>` | GET | Returns upload/transfer progress for a running print job (0–100), plus `error` if sending failed |
-| `/mix` | POST | Generates a resin-mixing file (`cycles`, `stroke` in mm) and sends it to the printer |
+| `/mix` | POST | Generates a resin-mixing file (`cycles`, `stroke` in mm), sends it to the printer and stops it on its last cycle |
 | `/stop-print` | POST | Sends a stop command to the printer via Cassini |
 | `/pause-print` | POST | Sends a pause command to the printer via Cassini |
 | `/resume-print` | POST | Sends a resume command to the printer via Cassini |
@@ -246,6 +246,10 @@ Pigments settle on the bottom of the vat. The **Mix resin** panel (shown when th
 Each cycle returns the platform to the same floor position. The first and last millimetre near the FEP run at 150 mm/min to avoid suction and impact, the rest at 500 mm/min. Keep the stroke below the resin depth, or the platform leaves the resin and folds air bubbles in. Resin that has stood for weeks still needs a good shake in the bottle first.
 
 The generated file is made for the Mars 4 Ultra (see `goo_file.py`).
+
+A completed job leaves the printer on its "print complete" screen (see below), but a stopped one does not. So the mix file gets a few extra cycles (about 20 s), and RPP watches the layer counter and sends **Stop** once the requested number of cycles is done. Nothing hangs on the platform after mixing, so there is nothing to confirm. If the stop is missed, the mix just completes and the screen needs a confirm as before.
+
+**Mix first** (checkbox next to Print) runs that mix with the cycles/stroke from the Mix panel, waits until the printer is ready again and then sends and starts the selected file, so you don't have to be there in between. If the mix is stopped or fails, the print is not started. The purple line in the printer card shows what the background job is doing.
 
 ## Notes on the "print complete" screen
 

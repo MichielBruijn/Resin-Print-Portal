@@ -6,6 +6,7 @@ import time
 import os
 import re
 import sys
+import math
 import goo_file
 import preview
 
@@ -68,6 +69,24 @@ def set_printer_ip():
         print(f"Error updating printer IP: {e}", flush=True)
         return jsonify({'error': str(e)})
 
+def query_status(printer_ip, timeout=10):
+    """cassini status output and whether the printer answered."""
+    cmd = CASSINI + ['-p', printer_ip, 'status']
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    output = result.stdout.strip()
+    return output, result.returncode == 0 and bool(output)
+
+
+def parse_status(output):
+    """Machine/print status, layer and file from cassini status output."""
+    def grab(pattern):
+        m = re.search(pattern, output)
+        return m.group(1).strip() if m else None
+    layer = grab(r'Layers: (\d+)/')
+    return {'machine': grab(r'Machine Status: (\S+)'), 'print': grab(r'Print Status: (\S+)'),
+            'layer': int(layer) if layer else None, 'file': grab(r'File: (.+)')}
+
+
 @app.route('/print-status')
 def print_status():
     printer_ip = read_printer_ip()
@@ -75,11 +94,7 @@ def print_status():
         return jsonify({'status': 'No printer address configured.', 'progress': 0, 'is_online': False})
 
     try:
-        cmd = CASSINI + ['-p', printer_ip, 'status']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        output = result.stdout.strip()
-
-        is_online = result.returncode == 0 and bool(output)
+        output, is_online = query_status(printer_ip)
 
         match = re.search(r'Layers: (\d+)/(\d+)', output)
         if match:
@@ -109,7 +124,8 @@ def print_status():
             'current_layer': current_layer,
             'total_layers': total_layers,
             'progress': progress,
-            'is_online': is_online
+            'is_online': is_online,
+            'job': job_info,
         })
     except subprocess.TimeoutExpired:
         return jsonify({'error': 'Printer status request timed out.'})
@@ -156,6 +172,7 @@ def _cassini_error(stderr, default):
 def upload_and_print(printer_ip, filepath, filename):
     """Upload file to printer and start printing in one MQTT session."""
     print(f"Starting upload+print for {filename}", flush=True)
+    ok = False
 
     try:
         # Single command: upload AND start printing over one MQTT connection
@@ -172,6 +189,7 @@ def upload_and_print(printer_ip, filepath, filename):
             job_errors[filename] = _cassini_error(result.stderr, 'Sending to printer failed')
         else:
             print(f"Upload+print completed successfully for {filename}", flush=True)
+            ok = True
 
     except subprocess.TimeoutExpired:
         print(f"Command timed out after {UPLOAD_TIMEOUT}s for {filename}", flush=True)
@@ -187,6 +205,7 @@ def upload_and_print(printer_ip, filepath, filename):
         progress_status.pop(filename, None)
         job_errors.pop(filename, None)
     threading.Thread(target=cleanup, daemon=True).start()
+    return ok
 
 def run_print_job(printer_ip, filepath, filename):
     """Wrapper that holds the print lock during the entire job."""
@@ -219,7 +238,8 @@ def print_file():
     if printer_ip is None:
         return jsonify({'error': 'Could not read printer IP address.'})
 
-    filename = (request.get_json(silent=True) or {}).get('filename')
+    data = request.get_json(silent=True) or {}
+    filename = data.get('filename')
     filepath = upload_path(filename)
     if filepath is None:
         return jsonify({'error': 'Invalid filename.'})
@@ -227,14 +247,25 @@ def print_file():
     if not os.path.exists(filepath):
         return jsonify({'error': f'File {filename} not found.'})
 
+    mix = None
+    if data.get('mix'):
+        mix, err = mix_params(data['mix'])
+        if err:
+            return jsonify({'error': err})
+
     if print_lock.locked():
         return jsonify({'error': 'A print job is already in progress. Please wait.'})
+
+    if mix:
+        print(f"Queueing mix ({mix[0]} x {mix[1]} mm) + print job for {filename}", flush=True)
+        threading.Thread(target=run_mix_job, args=(printer_ip, *mix, (filepath, filename))).start()
+        return jsonify({'message': f'Mixing first, then printing {filename}', 'filename': MIX_NAME})
 
     print(f"Queueing print job for {filename}", flush=True)
     job_thread = threading.Thread(target=run_print_job, args=(printer_ip, filepath, filename))
     job_thread.start()
 
-    return jsonify({'message': f'Uploading and printing {filename}...'})
+    return jsonify({'message': f'Uploading and printing {filename}...', 'filename': filename})
 
 
 MIX_DIR = os.path.join(UPLOAD_FOLDER, '.generated')  # hidden from /files
@@ -247,25 +278,141 @@ def mix_resin():
     printer_ip = read_printer_ip()
     if printer_ip is None:
         return jsonify({'error': 'Could not read printer IP address.'})
-    data = request.get_json(silent=True) or {}
-    try:
-        cycles = int(data.get('cycles', 60))
-        stroke = float(data.get('stroke', 15))
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid cycles or stroke.'})
-    if not (1 <= cycles <= 500 and 2 <= stroke <= 40):
-        return jsonify({'error': 'Cycles must be 1-500 and stroke 2-40 mm.'})
+    mix, err = mix_params(request.get_json(silent=True) or {})
+    if err:
+        return jsonify({'error': err})
     if print_lock.locked():
         return jsonify({'error': 'A print job is already in progress. Please wait.'})
 
+    cycles, stroke = mix
+    print(f"Mixing: {cycles} cycles, {stroke} mm", flush=True)
+    threading.Thread(target=run_mix_job, args=(printer_ip, cycles, stroke)).start()
+    return jsonify({'message': f'Mixing: {cycles} x {stroke:g} mm', 'filename': MIX_NAME})
+
+
+def mix_params(data):
+    """(cycles, stroke), error"""
+    try:
+        cycles = int(data.get('cycles', 60))
+        stroke = float(data.get('stroke', 15))
+    except (TypeError, ValueError, AttributeError):
+        return None, 'Invalid cycles or stroke.'
+    if not (1 <= cycles <= 500 and 2 <= stroke <= 40):
+        return None, 'Cycles must be 1-500 and stroke 2-40 mm.'
+    return (cycles, stroke), None
+
+
+# Background job shown in the UI (mix watcher, print after mix)
+job_info = {'id': 0, 'text': None, 'error': None}
+
+
+def set_job(text=None, error=None):
+    job_info.update(id=job_info['id'] + 1, text=text, error=error)
+    if text or error:
+        print(f"Job: {text or ''} {error or ''}", flush=True)
+
+
+def wait_status(printer_ip, done, timeout, interval=1.0):
+    """Poll the printer until done(status) returns a value; None on timeout."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            output, online = query_status(printer_ip)
+        except subprocess.TimeoutExpired:
+            online = False
+        if online:
+            result = done(parse_status(output))
+            if result is not None:
+                return result
+        time.sleep(interval)
+    return None
+
+
+def run_mix_job(printer_ip, cycles, stroke, then_print=None):
+    """Mix, stop it on the last cycle (a stopped job needs no confirmation on the
+    printer, a completed one does), then optionally print a file."""
+    with print_lock:
+        job_errors.pop(MIX_NAME, None)
+        progress_status[MIX_NAME] = 50
+        try:
+            _mix_and_print(printer_ip, cycles, stroke, then_print)
+        except Exception as e:
+            set_job(error=f'Mix job failed: {e}')
+
+
+MIX_PAD_S = 20  # extra pumping in the file so our stop arrives before the end
+
+
+def _mix_and_print(printer_ip, cycles, stroke, then_print):
+    per_cycle = goo_file.mix_seconds(1, stroke)
+    pad = max(3, math.ceil(MIX_PAD_S / per_cycle))
     os.makedirs(MIX_DIR, exist_ok=True)
     filepath = os.path.join(MIX_DIR, MIX_NAME)
     with open(filepath, 'wb') as f:
-        f.write(goo_file.build_mix(cycles, stroke))
+        f.write(goo_file.build_mix(cycles + pad, stroke))
 
-    print(f"Mixing: {cycles} cycles, {stroke} mm", flush=True)
-    threading.Thread(target=run_print_job, args=(printer_ip, filepath, MIX_NAME)).start()
-    return jsonify({'message': f'Mixing: {cycles} x {stroke:g} mm', 'filename': MIX_NAME})
+    after = f', then print {then_print[1]}' if then_print else ''
+    set_job(f'Mixing {cycles} x {stroke:g} mm{after}')
+    if not upload_and_print(printer_ip, filepath, MIX_NAME):
+        set_job(error=f'Mix could not start: {job_errors.get(MIX_NAME, "unknown error")}')
+        return
+
+    started = {'at': time.time(), 'seen': False}
+
+    def mix_progress(st):
+        running = st['file'] == MIX_NAME and st['machine'] == 'BUSY'
+        if not started['seen']:
+            # The printer may still report the previous job for a moment
+            if running:
+                started['seen'] = True
+            elif time.time() - started['at'] > 90:
+                return 'other'
+            return None
+        if st['file'] != MIX_NAME:
+            return 'other'
+        if st['print'] == 'COMPLETE':
+            return 'complete'
+        if st['machine'] == 'READY' or st['print'] in ('CANCELED', 'STOPPED', 'IDLE'):
+            return 'stopped'  # by the user
+        if st['layer'] is not None and st['layer'] >= cycles \
+                and st['print'] not in ('PAUSED_HW', 'PAUSED_LIFTED', 'STOPPING'):
+            return 'last'
+        return None
+
+    result = wait_status(printer_ip, mix_progress,
+                         timeout=goo_file.mix_seconds(cycles + pad, stroke) * 2 + 600)
+    if result == 'last':
+        r = subprocess.run(CASSINI + ['-p', printer_ip, 'stop'], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            set_job(error=f'Could not stop the mix: {_cassini_error(r.stderr, "stop failed")}')
+            return
+        print("Mix stopped on its last cycle", flush=True)
+    elif result == 'complete':
+        set_job(error='Mix ran to the end before it could be stopped: confirm the printer screen.')
+        return
+    elif result == 'stopped':
+        set_job(error='Mix was stopped; print not started.' if then_print else None)
+        return
+    else:
+        set_job(error='Lost track of the mix' + ('; print not started.' if then_print else '.'))
+        return
+
+    # Printer goes READY once the stop is handled and the platform is up
+    ready = wait_status(printer_ip, lambda st: True if st['machine'] == 'READY' else None, timeout=180)
+    if not ready:
+        set_job(error='Printer did not become ready after mixing' + ('; print not started.' if then_print else '.'))
+        return
+    if not then_print:
+        set_job()
+        return
+
+    filepath, filename = then_print
+    time.sleep(3)
+    set_job(f'Mixed; sending {filename} to the printer')
+    if upload_and_print(printer_ip, filepath, filename):
+        set_job()
+    else:
+        set_job(error=f'Print after mix failed: {job_errors.get(filename, "unknown error")}')
 
 
 def _run_print_control(command):

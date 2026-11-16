@@ -108,14 +108,21 @@ function uploadFile() {
 
 function printSelectedFile() {
     if (selectedFile) {
-        showLoadingIndicator('Preparing print...');
+        const body = { filename: selectedFile };
+        if (document.getElementById('mix-first').checked) {
+            body.mix = {
+                cycles: parseInt(document.getElementById('mix-cycles').value),
+                stroke: parseFloat(document.getElementById('mix-stroke').value),
+            };
+        }
+        showLoadingIndicator(body.mix ? 'Preparing mix...' : 'Preparing print...');
 
         fetch('/print-file', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ filename: selectedFile }),
+            body: JSON.stringify(body),
         })
             .then(response => response.json())
             .then(data => {
@@ -123,7 +130,7 @@ function printSelectedFile() {
                     notify(data.error, true);
                     hideLoadingIndicator();
                 } else {
-                    checkProgress(selectedFile); // Start polling for progress
+                    checkProgress(data.filename || selectedFile); // Start polling for progress
                     notify(data.message);
                 }
             })
@@ -268,6 +275,7 @@ function fetchPrintStatus() {
                     : isBusy ? 'printing' : needsConfirm ? 'done' : 'idle';
                 setFaviconState(fav, data.progress);
             }
+            showJob(data.job);
             const mixPanel = document.getElementById('mix-panel');
             if (mixPanel) mixPanel.style.display = (data.is_online && !isBusy && !isPaused) ? 'block' : 'none';
             if (controls) {
@@ -280,6 +288,17 @@ function fetchPrintStatus() {
             console.error('Error:', error);
             document.getElementById('status').innerText = 'Error loading status.';
         });
+}
+
+// Server-side background job (mix watcher, print after mix)
+let lastJobId = null;
+function showJob(job) {
+    const el = document.getElementById('job-info');
+    if (!job || !el) return;
+    el.style.display = job.text ? 'block' : 'none';
+    el.textContent = job.text || '';
+    if (lastJobId !== null && job.id !== lastJobId && job.error) notify(job.error, true);
+    lastJobId = job.id;
 }
 
 // Same estimate as goo_file.mix_seconds()
