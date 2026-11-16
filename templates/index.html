@@ -37,6 +37,7 @@
       <span class="progress-text" id="progress-text">0%</span>
     </div>
     <div class="time-info" id="time-info" style="display:none;"></div>
+    <div class="job-info" id="job-info" style="display:none;"></div>
     <div class="action-buttons" id="print-controls" style="display:none;">
       <button class="btn btn-pause" id="btn-pause" onclick="pausePrint()">&#9646;&#9646; Pause</button>
       <button class="btn btn-resume" id="btn-resume" onclick="resumePrint()" style="display:none;">&#9654; Resume</button>
@@ -76,6 +77,7 @@
     <div class="action-buttons">
       <button class="btn btn-upload" onclick="uploadFile()">&#8679; Upload</button>
       <button class="btn btn-print" onclick="printSelectedFile()">&#9654; Print</button>
+      <label class="mix-first" title="Run the mix (cycles/stroke from Mix resin) right before printing"><input type="checkbox" id="mix-first"> Mix first</label>
       <button class="btn btn-delete" onclick="deleteSelectedFile()">&#10005; Delete</button>
     </div>
   </section>
