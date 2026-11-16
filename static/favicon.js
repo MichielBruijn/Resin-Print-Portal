@@ -11,12 +11,8 @@
     };
     let state = 'idle', progress = 0, frame = 0, timer = null, lastUrl = '';
 
-    let link = document.querySelector('link[rel="icon"]');
-    if (!link) {
-        link = document.createElement('link');
-        link.rel = 'icon';
-        document.head.appendChild(link);
-    }
+    // Own <link>, added after load: the static icons stay what bookmarks store
+    let link = null;
 
     function roundRect(x, y, w, h, r) {
         ctx.beginPath();
@@ -131,7 +127,7 @@
 
         // Only push changed frames to the browser
         const url = canvas.toDataURL('image/png');
-        if (url !== lastUrl) {
+        if (link && url !== lastUrl) {
             link.type = 'image/png';
             link.href = url;
             lastUrl = url;
@@ -157,4 +153,12 @@
     };
 
     window.setFaviconState('idle', 0);
+    window.addEventListener('load', () => setTimeout(() => {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        link.type = 'image/png';
+        document.head.appendChild(link);
+        lastUrl = '';
+        draw();
+    }, 2000));
 })();

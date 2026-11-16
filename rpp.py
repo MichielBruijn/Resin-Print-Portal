@@ -34,6 +34,11 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/favicon.ico')
+def favicon():
+    return app.send_static_file('favicon.ico')
+
+
 @app.route('/get-printer-ip', methods=['GET'])
 def get_printer_ip():
     return jsonify({'ip': read_printer_ip() or ''})
