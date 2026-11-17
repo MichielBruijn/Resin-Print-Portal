@@ -87,3 +87,59 @@ def preview_png(path):
         png = None
     _cache[path] = (mtime, png)
     return png
+
+
+# ChituBox encrypts the settings block of newer CTB files (key/IV as published by UVtools)
+_CTB_KEY = bytes.fromhex('D05B8E3371DE3D1AE54F22DDDF5BFD94AB5D643A9D7EBFAF4203F310D8522AEA')
+_CTB_IV = bytes.fromhex('0F010A05050B060708060A0C0C0D090F')
+_info_cache = {}  # path -> (mtime, info or None)
+
+
+def _ctb_info(path):
+    with open(path, 'rb') as f:
+        head = f.read(4096)
+        magic = struct.unpack_from('<I', head, 0)[0]
+        if magic == 0x12FD0107:  # encrypted
+            size, off = struct.unpack_from('<2I', head, 4)
+            f.seek(off)
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            dec = Cipher(algorithms.AES(_CTB_KEY), modes.CBC(_CTB_IV)).decryptor()
+            s = dec.update(f.read(size)) + dec.finalize()
+            lh = struct.unpack_from('<f', s, 0x24)[0]
+            count = struct.unpack_from('<I', s, 0x40)[0]
+        elif magic in (0x12FD0019, 0x12FD0086):
+            lh = struct.unpack_from('<f', head, 0x20)[0]
+            count = struct.unpack_from('<I', head, 0x44)[0]
+        else:
+            return None
+    return lh, count
+
+
+def _goo_info(path):
+    fmt = goo_file._fmt(goo_file.HDR)
+    with open(path, 'rb') as f:
+        hdr = dict(zip([n for n, _ in goo_file.HDR],
+                       struct.unpack_from(fmt, f.read(struct.calcsize(fmt)))))
+    return hdr['layer_height'], hdr['layer_count']
+
+
+def file_info(path):
+    """{'layers', 'layer_height', 'height'} (mm) from the file header, or None."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    hit = _info_cache.get(path)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    info = None
+    try:
+        ext = path.lower().rsplit('.', 1)[-1]
+        r = _ctb_info(path) if ext == 'ctb' else _goo_info(path) if ext == 'goo' else None
+        if r and 0.001 <= r[0] <= 1 and 0 < r[1] <= 200000:
+            lh, count = round(r[0], 4), r[1]
+            info = {'layers': count, 'layer_height': lh, 'height': round(lh * count, 2)}
+    except Exception as e:
+        print(f"File info failed for {path}: {e}", flush=True)
+    _info_cache[path] = (mtime, info)
+    return info

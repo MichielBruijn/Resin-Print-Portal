@@ -10,84 +10,94 @@
 </head>
 <body>
 
-<header class="header">
-  <span class="header-title">Resin Print Portal</span>
-</header>
-
-<main class="main">
-
-  <section class="card status-card">
-    <h2 class="card-title">Printer</h2>
-    <div class="printer-meta">
+<div class="top">
+  <header class="header">
+    <span class="header-title">Resin Print Portal</span>
+    <div class="printer-picker">
       <span id="online-status" class="online-status offline">OFFLINE</span>
-      <div class="ip-row">
-        <input type="text" id="printer-ip" readonly placeholder="IP or hostname">
-        <button onclick="editIP()" class="btn btn-edit">Edit</button>
-        <button onclick="saveIP()" class="btn btn-save">Save</button>
+      <select id="printer-select" title="Printer" onchange="selectPrinter(this.value)"></select>
+      <button class="btn btn-ghost" onclick="openPrinters()" title="Saved printers">Printers&hellip;</button>
+      <button class="btn btn-ghost" onclick="openHA()" title="Home Assistant (MQTT)">Home Assistant&hellip;</button>
+    </div>
+  </header>
+
+  <section class="card panel">
+    <div class="panel-preview">
+      <div class="preview-box" id="preview-box">
+        <img id="big-preview" alt="" style="display:none;"
+             onload="this.style.display='block'; this.nextElementSibling.style.display='none'"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+        <div class="preview-empty">No preview</div>
+      </div>
+      <div class="preview-caption"><span id="preview-label" class="preview-label"></span><span id="preview-name"></span></div>
+    </div>
+
+    <div class="panel-status">
+      <div class="status-grid" id="status-grid"><div class="status-loading" id="status">Loading...</div></div>
+      <div id="confirm-hint" class="confirm-hint" style="display:none;">Print finished &mdash; confirm the screen on the printer before starting a new job.</div>
+      <div class="progress-container" id="progress-container">
+        <div class="progress-bar" id="progress-bar"></div>
+        <span class="progress-text" id="progress-text">0%</span>
+      </div>
+      <div class="time-info" id="time-info" style="display:none;"></div>
+      <div class="job-info" id="job-info" style="display:none;"></div>
+      <div class="action-buttons" id="print-controls" style="display:none;">
+        <button class="btn btn-pause" id="btn-pause" onclick="pausePrint()">&#9646;&#9646; Pause</button>
+        <button class="btn btn-resume" id="btn-resume" onclick="resumePrint()" style="display:none;">&#9654; Resume</button>
+        <button class="btn btn-stop" onclick="stopPrint()">&#9632; Stop</button>
       </div>
     </div>
-    <div class="status-row">
-      <div id="status" class="status-text">Loading...</div>
-      <img id="print-preview" class="print-preview" alt="" style="display:none;"
-           onload="this.style.display='block'" onerror="this.style.display='none'">
-    </div>
-    <div id="confirm-hint" class="confirm-hint" style="display:none;">Print finished &mdash; confirm the screen on the printer before starting a new job.</div>
-    <div class="progress-container">
-      <div class="progress-bar" id="progress-bar"></div>
-      <span class="progress-text" id="progress-text">0%</span>
-    </div>
-    <div class="time-info" id="time-info" style="display:none;"></div>
-    <div class="job-info" id="job-info" style="display:none;"></div>
-    <div class="action-buttons" id="print-controls" style="display:none;">
-      <button class="btn btn-pause" id="btn-pause" onclick="pausePrint()">&#9646;&#9646; Pause</button>
-      <button class="btn btn-resume" id="btn-resume" onclick="resumePrint()" style="display:none;">&#9654; Resume</button>
-      <button class="btn btn-stop" onclick="stopPrint()">&#9632; Stop</button>
-    </div>
-    <div class="mix-panel" id="mix-panel" style="display:none;">
-      <div class="mix-title">Mix resin <span class="mix-hint">platform pumps up and down, no exposure</span></div>
-      <div class="mix-row">
-        <label>Cycles <input type="number" id="mix-cycles" min="1" max="500" value="60" oninput="updateMixEstimate()"></label>
-        <label>Stroke <input type="number" id="mix-stroke" min="2" max="40" step="1" value="15" oninput="updateMixEstimate()"> mm</label>
-        <span class="mix-estimate" id="mix-estimate"></span>
-        <button class="btn btn-mix" id="btn-mix" onclick="startMix()">&#8645; Mix</button>
+
+    <div class="panel-actions">
+      <div class="selected-file">
+        <span class="field-label">Selected</span>
+        <span id="selected-name" class="selected-name">&mdash;</span>
+        <span id="selected-meta" class="selected-meta"></span>
+      </div>
+      <div class="action-buttons">
+        <button class="btn btn-print" id="btn-print" onclick="printSelectedFile()">&#9654; Print</button>
+        <label class="mix-first" title="Run the mix (cycles/stroke below) right before printing"><input type="checkbox" id="mix-first"> Mix first</label>
+      </div>
+      <div class="action-buttons">
+        <button class="btn btn-upload" onclick="uploadFile()">&#8679; Upload</button>
+        <button class="btn btn-delete" onclick="deleteSelectedFile()">&#10005; Delete</button>
+      </div>
+      <div class="mix-panel" id="mix-panel">
+        <div class="mix-title">Mix resin <span class="mix-hint">pumps the platform, no exposure</span></div>
+        <div class="mix-row">
+          <label>Cycles <input type="number" id="mix-cycles" min="1" max="500" value="60" oninput="updateMixEstimate()"></label>
+          <label>Stroke <input type="number" id="mix-stroke" min="2" max="40" step="1" value="15" oninput="updateMixEstimate()"> mm</label>
+          <span class="mix-estimate" id="mix-estimate"></span>
+          <button class="btn btn-mix" id="btn-mix" onclick="startMix()">&#8645; Mix</button>
+        </div>
       </div>
     </div>
   </section>
+</div>
 
+<main class="files">
   <section class="card files-card">
     <h2 class="card-title">Files</h2>
-    <div class="table-wrapper">
-      <table class="file-list" id="file-list">
-        <thead>
-          <tr>
-            <th class="thumb-col"></th>
-            <th>Name</th>
-            <th>Uploaded</th>
-            <th>Size</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div class="file-preview" id="file-preview" style="display:none;">
-      <img id="file-preview-img" alt="" onload="this.parentElement.style.display='flex'"
-           onerror="this.parentElement.style.display='none'">
-      <div class="file-preview-name" id="file-preview-name"></div>
-    </div>
-    <div class="action-buttons">
-      <button class="btn btn-upload" onclick="uploadFile()">&#8679; Upload</button>
-      <button class="btn btn-print" onclick="printSelectedFile()">&#9654; Print</button>
-      <label class="mix-first" title="Run the mix (cycles/stroke from Mix resin) right before printing"><input type="checkbox" id="mix-first"> Mix first</label>
-      <button class="btn btn-delete" onclick="deleteSelectedFile()">&#10005; Delete</button>
-    </div>
+    <table class="file-list" id="file-list">
+      <thead>
+        <tr>
+          <th class="thumb-col"></th>
+          <th>Name</th>
+          <th class="num">Layers</th>
+          <th class="num">Height</th>
+          <th>Uploaded</th>
+          <th class="num">Size</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </section>
 
+  <footer class="footer">
+    <p>Based on <a href="https://github.com/jjtronics/RPP" target="_blank" rel="noopener">RPP</a> by JJtronics &mdash; uses <a href="https://github.com/vvuk/cassini" target="_blank" rel="noopener">Cassini</a> by Vladimir Vukicevic</p>
+    <p>Fork: <a href="https://github.com/MichielBruijn/Resin-Print-Portal" target="_blank" rel="noopener">github.com/MichielBruijn/Resin-Print-Portal</a></p>
+  </footer>
 </main>
-
-<footer class="footer">
-  <p>Based on <a href="https://github.com/jjtronics/RPP" target="_blank" rel="noopener">RPP</a> by JJtronics &mdash; uses <a href="https://github.com/vvuk/cassini" target="_blank" rel="noopener">Cassini</a> by Vladimir Vukicevic</p>
-  <p>Fork: <a href="https://github.com/MichielBruijn/Resin-Print-Portal" target="_blank" rel="noopener">github.com/MichielBruijn/Resin-Print-Portal</a></p>
-</footer>
 
 <script src="{{ url_for('static', filename='favicon.js') }}"></script>
 <script src="{{ url_for('static', filename='script.js') }}"></script>

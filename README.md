@@ -11,8 +11,10 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 - Real-time print progress (layer counter + progress bar) with elapsed time, remaining time and expected finish time
 - Pause, Resume and Stop a running print
 - Printer online/offline status indicator
-- Preview image of the model being printed (from the slice file, like on the printer's screen)
-- Configure printer IP address or hostname via the web UI
+- Large preview image of the selected model (or the one being printed), from the slice file
+- Layer count and print height in mm (read from the `.ctb`/`.goo` header, also for encrypted CTB)
+- Saved printers: pick the active printer from a list in the header
+- **Home Assistant**: publishes the full printer status over MQTT (broker, login, topic and interval set in the web UI)
 - **Mix resin**: pump the platform up and down (no exposure) to stir the resin in the vat
 
 ## File overview
@@ -24,11 +26,13 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | Serves the web interface (`index.html`) |
-| `/get-printer-ip` | GET | Returns the currently configured printer IP |
-| `/set-printer-ip` | POST | Saves a new printer IP to `printer_ip.txt` |
-| `/print-status` | GET | Polls the printer status via Cassini and returns JSON with current layer, total layers, progress %, elapsed/remaining seconds and online state |
+| `/settings` | GET | Saved printers, active printer, Home Assistant settings (password left out) and last publish result |
+| `/printers` | POST | Saves the printer list (`printers: [{name, host}]`) and/or the active printer (`active`) |
+| `/ha-settings` | POST | Saves the Home Assistant/MQTT settings (empty password keeps the stored one) |
+| `/ha-test` | POST | Publishes the current status once with the settings from the form |
+| `/print-status` | GET | Polls the printer status via Cassini and returns JSON with machine/print state, current/total layers, layer height, progress %, elapsed/remaining seconds, mix progress and online state |
 | `/upload` | POST | Saves an uploaded `.ctb`/`.goo` file to the `uploads/` folder (other extensions are rejected) |
-| `/files` | GET | Lists all files in `uploads/` with their size in MB and upload time, newest first |
+| `/files` | GET | Lists all files in `uploads/` with size in MB, upload time, layer count, layer height and total height, newest first |
 | `/print-file` | POST | Starts a background thread that uploads the selected file to the printer and immediately starts the print; with `mix: {cycles, stroke}` it mixes first |
 | `/preview/<filename>` | GET | PNG of the slicer preview inside an uploaded `.ctb`/`.goo`, 404 if it has none |
 | `/progress/<filename>` | GET | Returns upload/transfer progress for a running print job (0–100), plus `error` if sending failed |
@@ -137,10 +141,11 @@ Computes MD5 and file size when a route is registered — these are sent to the 
 
 ### `templates/index.html` — Web interface
 
-Single-page HTML interface with two cards:
+Single-page HTML interface. The top part stays in place, only the file list below it scrolls (on small or low screens the whole page scrolls):
 
-- **Printer card:** shows online/offline status, the configured IP (editable), current print status text, a progress bar, Pause/Resume/Stop buttons (visible only during an active print) and the Mix resin panel (visible when the printer is idle).
-- **Files card:** table of uploaded files with a preview thumbnail, name, upload date/time and size (newest first). Selecting a file shows a large preview below the list. Buttons to Upload, Print, and Delete.
+- **Header:** online/offline badge, printer picker, and the *Printers…* and *Home Assistant…* dialogs.
+- **Printer panel:** large preview of the selected file (or of the job on the printer when nothing is selected); machine/print state, layer and height in mm, progress bar, elapsed/remaining/ready time, Pause/Resume/Stop during a job; the selected file with Print, Mix first, Upload and Delete; and the Mix resin panel (Mix and Print are disabled while the printer is busy).
+- **Files:** table of uploaded files with thumbnail, name, layers, height, upload time and size (newest first).
 
 ---
 
@@ -163,9 +168,13 @@ Dark-theme CSS for the web interface. Card layout, progress bar styling, button 
 
 ---
 
-### `printer_ip.txt` — Printer address
+### `data/settings.json` — Settings
 
-Plain-text file containing the IP address or hostname of the printer. Read on every request by `rpp.py`; written when the user saves a new address via the web UI. Not tracked by git (it's in `.gitignore`), so updates don't overwrite it.
+Saved printers, the active printer and the Home Assistant/MQTT settings, written from the web UI (mode 600: it holds the MQTT password). `data/` must be writable by the service user; `install.sh` and `update.sh` create it. Not tracked by git. On first start the address from the old `printer_ip.txt` is taken over.
+
+### `mqtt_publish.py` — MQTT publisher
+
+Minimal MQTT 3.1.1 client (connect with optional login, publish QoS 0, disconnect), no extra packages. A background thread in `rpp.py` publishes `cassini status-full` as JSON every *interval* seconds when Home Assistant is enabled; this replaces a separate `mosquitto_pub` loop.
 
 ---
 
@@ -177,13 +186,13 @@ Runs `rpp.py` as a systemd service under the `www-data` user, restarting automat
 
 ### `install.sh` — Installation script
 
-One-shot setup: installs `git` and `python3-venv`, clones the repo to `/opt/RPP`, creates a virtualenv with the packages from `requirements.txt`, creates `uploads/` and `printer_ip.txt` with the right permissions, and enables + starts the systemd service.
+One-shot setup: installs `git` and `python3-venv`, clones the repo to `/opt/RPP`, creates a virtualenv with the packages from `requirements.txt`, creates `uploads/` and `data/` with the right permissions, and enables + starts the systemd service.
 
 ---
 
 ### `update.sh` — Update script
 
-Pulls the latest version from GitHub (`git reset --hard HEAD && git pull`) while keeping your `printer_ip.txt`, updates the virtualenv, resets permissions on the writable files and restarts the service. Don't run it while a file is being sent to the printer (a print that is already running is not affected).
+Pulls the latest version from GitHub (`git reset --hard HEAD && git pull`) while keeping your `printer_ip.txt` and `data/`, updates the virtualenv, resets permissions on the writable files and restarts the service. Don't run it while a file is being sent to the printer (a print that is already running is not affected).
 
 ---
 
@@ -217,14 +226,14 @@ sudo git clone https://github.com/MichielBruijn/Resin-Print-Portal.git /opt/RPP
 cd /opt/RPP
 sudo python3 -m venv venv
 sudo venv/bin/pip install -r requirements.txt
-sudo mkdir -p uploads && sudo touch printer_ip.txt
-sudo chown -R www-data:www-data uploads printer_ip.txt
+sudo mkdir -p uploads data
+sudo chown -R www-data:www-data uploads data
 sudo cp rpp.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now rpp
 ```
 
-Set the printer IP address or hostname in the web UI (or `echo 192.168.1.50 | sudo tee printer_ip.txt`).
+Add the printer (IP address or hostname) under *Printers…* in the web UI.
 
 The interface runs on port **5001**. It has no authentication: only expose it on a trusted network, or put a reverse proxy (nginx, Apache) with authentication in front of it.
 
@@ -250,6 +259,8 @@ The generated file is made for the Mars 4 Ultra (see `goo_file.py`).
 A completed job leaves the printer on its "print complete" screen (see below), but a stopped one does not. So the mix file gets a few extra cycles (about 20 s), and RPP watches the layer counter and sends **Stop** once the requested number of cycles is done. Nothing hangs on the platform after mixing, so there is nothing to confirm. If the stop is missed, the mix just completes and the screen needs a confirm as before.
 
 **Mix first** (checkbox next to Print) runs that mix with the cycles/stroke from the Mix panel, waits until the printer is ready again and then sends and starts the selected file, so you don't have to be there in between. If the mix is stopped or fails, the print is not started. The purple line in the printer card shows what the background job is doing.
+
+While mixing, the progress bar counts the requested cycles (not the padding cycles), so it reaches 100% and shows **Mix finished ✓** after the automatic stop; a mix stopped early shows **Mix stopped**.
 
 ## Notes on the "print complete" screen
 

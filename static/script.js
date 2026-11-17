@@ -1,59 +1,184 @@
 // script.js - Printer status polling, file management, upload, print control (pause/resume/stop)
 
 let selectedFile = null;
+let fileInfo = {};      // name -> {uploaded, layers, height, layer_height}
+let printerState = {};  // last /print-status answer + derived flags
 
-document.addEventListener('DOMContentLoaded', (event) => {
+document.addEventListener('DOMContentLoaded', () => {
     updateMixEstimate();
     fetchPrintStatus();
     fetchFiles();
-    loadPrinterIP();
+    loadSettings();
 });
 
-function loadPrinterIP() {
-    fetch('/get-printer-ip')
-        .then(response => response.json())
-        .then(data => {
-            if (data.ip) {
-                document.getElementById('printer-ip').value = data.ip;
-            } else {
-                console.error('Error loading IP:', data.error);
-            }
-        });
+// --- Printers ---
+let settings = { printers: [], active: '', ha: {} };
+
+function loadSettings() {
+    return fetch('/settings')
+        .then(r => r.json())
+        .then(data => { settings = data; renderPrinterSelect(); });
 }
 
-// Save the IP address to the server
-function saveIP() {
-    let ipField = document.getElementById('printer-ip');
-    let saveBtn = document.querySelector('.btn-save');
-    let newIP = ipField.value;
+function renderPrinterSelect() {
+    const sel = document.getElementById('printer-select');
+    sel.innerHTML = '';
+    if (!settings.printers.length) {
+        sel.appendChild(new Option('No printer — add one', ''));
+    }
+    settings.printers.forEach(p => {
+        const label = p.name && p.name !== p.host ? `${p.name} (${p.host})` : p.host;
+        sel.appendChild(new Option(label, p.host, false, p.host === settings.active));
+    });
+}
 
-    fetch('/set-printer-ip', {
+function selectPrinter(host) {
+    if (!host) { openPrinters(); return; }
+    fetch('/printers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: newIP }),
+        body: JSON.stringify({ active: host }),
     })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
-            if (data.message) {
-                notify('Printer address saved.');
-                ipField.readOnly = true;
-                saveBtn.style.display = 'none';
-            } else {
-                console.error('Error saving IP:', data.error);
-                notify('Error saving: ' + data.error, true);
-            }
+            if (data.error) { notify(data.error, true); renderPrinterSelect(); return; }
+            settings = data;
+            notify('Printer: ' + host);
+            fetchPrintStatus();
         });
 }
 
-function editIP() {
-    let ipField = document.getElementById('printer-ip');
-    let saveBtn = document.querySelector('.btn-save');
+function openPrinters() {
+    const list = document.createElement('div');
+    list.className = 'printer-rows';
+    const addRow = (p = { name: '', host: '' }) => {
+        const row = document.createElement('div');
+        row.className = 'printer-row';
+        const name = Object.assign(document.createElement('input'), { placeholder: 'Name', value: p.name, className: 'name' });
+        const host = Object.assign(document.createElement('input'), { placeholder: 'IP or hostname', value: p.host, className: 'host' });
+        const del = Object.assign(document.createElement('button'), { className: 'btn btn-ghost', textContent: '✕', title: 'Remove' });
+        del.onclick = () => row.remove();
+        row.append(name, host, del);
+        list.appendChild(row);
+        return row;
+    };
+    settings.printers.forEach(p => addRow(p));
+    if (!settings.printers.length) addRow();
+    const add = Object.assign(document.createElement('button'), { className: 'btn btn-ghost', textContent: '+ Add printer' });
+    add.onclick = () => addRow().querySelector('input').focus();
+    const body = document.createElement('div');
+    body.append(list, add);
 
-    ipField.readOnly = false;
-    ipField.focus();
-    ipField.select();
+    openModal('Saved printers', body, [
+        { label: 'Cancel' },
+        { label: 'Save', primary: true, action: close => {
+            const printers = [...list.querySelectorAll('.printer-row')]
+                .map(r => ({ name: r.querySelector('.name').value.trim(), host: r.querySelector('.host').value.trim() }))
+                .filter(p => p.name || p.host);
+            fetch('/printers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ printers }),
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) { notify(data.error, true); return; }
+                    settings = data;
+                    renderPrinterSelect();
+                    notify('Printers saved.');
+                    fetchPrintStatus();
+                    close();
+                });
+        } },
+    ]);
+}
 
-    saveBtn.style.display = 'inline-block';
+// --- Home Assistant (MQTT) ---
+function openHA() {
+    loadSettings().then(() => {
+        const ha = settings.ha;
+        const form = document.createElement('form');
+        form.className = 'settings-form';
+        form.onsubmit = e => e.preventDefault();
+        const field = (label, name, attrs = {}) => {
+            const l = document.createElement('label');
+            l.textContent = label;
+            const i = Object.assign(document.createElement('input'), { name, ...attrs });
+            l.appendChild(i);
+            form.appendChild(l);
+            return i;
+        };
+        const en = document.createElement('label');
+        en.className = 'check';
+        const enBox = Object.assign(document.createElement('input'), { type: 'checkbox', name: 'enabled', checked: ha.enabled });
+        en.append(enBox, ' Publish printer status to Home Assistant');
+        form.appendChild(en);
+        field('Broker host', 'host', { value: ha.host, placeholder: 'homeassistant' });
+        field('Port', 'port', { type: 'number', value: ha.port, min: 1, max: 65535 });
+        field('Username', 'username', { value: ha.username, autocomplete: 'off' });
+        field('Password', 'password', { type: 'password', autocomplete: 'new-password',
+            placeholder: ha.password_set ? '•••••• (unchanged)' : '' });
+        field('Topic', 'topic', { value: ha.topic });
+        field('Interval (s)', 'interval', { type: 'number', value: ha.interval, min: 5, max: 3600 });
+        const st = document.createElement('p');
+        st.className = 'settings-status';
+        const hs = settings.ha_state || {};
+        st.textContent = hs.last_error ? 'Last error: ' + hs.last_error
+            : hs.last_ok ? 'Last published ' + formatDate(hs.last_ok) : ha.enabled ? 'Not published yet.' : 'Off.';
+        if (hs.last_error) st.classList.add('error');
+        form.appendChild(st);
+
+        const values = () => {
+            const v = Object.fromEntries(new FormData(form));
+            v.enabled = enBox.checked;
+            return v;
+        };
+        const post = (url, done) => fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(values()),
+        }).then(r => r.json()).then(data => {
+            if (data.error) notify(data.error, true); else done(data);
+        });
+
+        openModal('Home Assistant (MQTT)', form, [
+            { label: 'Test', action: () => post('/ha-test', d => notify(d.message)) },
+            { label: 'Cancel' },
+            { label: 'Save', primary: true, action: close => post('/ha-settings', d => {
+                settings = d;
+                notify(d.message);
+                close();
+            }) },
+        ]);
+    });
+}
+
+// Generic dialog: buttons [{label, primary, action(close)}]; no action = close
+function openModal(title, body, buttons) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal modal-wide';
+    const h = document.createElement('h3');
+    h.className = 'modal-title';
+    h.textContent = title;
+    const row = document.createElement('div');
+    row.className = 'modal-buttons';
+    const close = () => { document.removeEventListener('keydown', onKey); overlay.remove(); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    buttons.forEach(b => {
+        const btn = Object.assign(document.createElement('button'), {
+            className: 'btn ' + (b.primary ? 'btn-print' : 'btn-cancel'), textContent: b.label, type: 'button' });
+        btn.onclick = () => b.action ? b.action(close) : close();
+        row.appendChild(btn);
+    });
+    box.append(h, body, row);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    document.addEventListener('keydown', onKey);
+    overlay.onclick = e => { if (e.target === overlay) close(); };
+    const first = box.querySelector('input');
+    if (first) first.focus();
 }
 
 function uploadFile() {
@@ -204,90 +329,134 @@ function checkProgress(filename) {
 function fetchPrintStatus() {
     fetch('/print-status')
         .then(response => response.json())
-        .then(data => {
-            document.getElementById('status').innerText = data.status || data.error || '';
-            let progressBar = document.getElementById('progress-bar');
-            let progressText = document.getElementById('progress-text');
-
-            let progressValue = (parseFloat(data.progress) || 0).toFixed(2);
-            if (progressBar) progressBar.style.width = progressValue + '%';
-            if (progressText) progressText.innerText = progressValue + '%';
-
-            const onlineStatusElement = document.getElementById('online-status');
-            if (onlineStatusElement) {
-                if (data.is_online) {
-                    onlineStatusElement.className = 'online-status online';
-                    onlineStatusElement.textContent = 'ONLINE';
-                } else {
-                    onlineStatusElement.className = 'online-status offline';
-                    onlineStatusElement.textContent = 'OFFLINE';
-                }
-            }
-
-            const controls = document.getElementById('print-controls');
-            const btnPause = document.getElementById('btn-pause');
-            const btnResume = document.getElementById('btn-resume');
-            const isPausedHW = data.is_online && data.status && data.status.includes('PAUSED_HW');
-            const isPausedLifted = !isPausedHW && data.is_online && data.status && data.status.includes('PAUSED_LIFTED');
-            const isPaused = isPausedHW || isPausedLifted;
-            // After a job the printer stays BUSY with COMPLETE/STOPPED: not active
-            const isDone = data.status && /Print Status: (COMPLETE|STOPPED|CANCELED|IDLE)/.test(data.status);
-            const isBusy = data.is_online && data.status && data.status.includes('BUSY') && !isDone;
-            // Printer keeps BUSY until its 'print complete' screen is confirmed
-            const needsConfirm = data.is_online && isDone && data.status.includes('BUSY');
-            const hint = document.getElementById('confirm-hint');
-            if (hint) hint.style.display = needsConfirm ? 'block' : 'none';
-            const btnMix = document.getElementById('btn-mix');
-            if (btnMix) btnMix.disabled = needsConfirm;
-            // Slicer preview of the file on the printer (if it was uploaded through RPP)
-            const img = document.getElementById('print-preview');
-            if (img) {
-                const jobShown = isBusy || isPaused || needsConfirm;  // printer still shows this job
-                const want = (data.is_online && data.file && jobShown) ? '/preview/' + encodeURIComponent(data.file) : '';
-                if (img.dataset.src !== want) {
-                    img.dataset.src = want;
-                    img.style.display = 'none';
-                    if (want) img.src = want; else img.removeAttribute('src');
-                }
-            }
-            const timeInfo = document.getElementById('time-info');
-            if (timeInfo) {
-                const showTime = (isBusy || isPaused) && data.remaining_s != null;
-                timeInfo.style.display = showTime ? 'flex' : 'none';
-                if (showTime) {
-                    const eta = new Date(Date.now() + data.remaining_s * 1000)
-                        .toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-                    timeInfo.innerHTML = '';
-                    [['Elapsed', formatDuration(data.elapsed_s)],
-                     ['Remaining', formatDuration(data.remaining_s)],
-                     ['Ready at', isPaused ? '—' : eta]].forEach(([label, value]) => {
-                        const span = document.createElement('span');
-                        span.textContent = label + ' ';
-                        const b = document.createElement('strong');
-                        b.textContent = value;
-                        span.appendChild(b);
-                        timeInfo.appendChild(span);
-                    });
-                }
-            }
-            if (window.setFaviconState) {
-                const fav = !data.is_online ? 'offline' : isPaused ? 'paused'
-                    : isBusy ? 'printing' : needsConfirm ? 'done' : 'idle';
-                setFaviconState(fav, data.progress);
-            }
-            showJob(data.job);
-            const mixPanel = document.getElementById('mix-panel');
-            if (mixPanel) mixPanel.style.display = (data.is_online && !isBusy && !isPaused) ? 'block' : 'none';
-            if (controls) {
-                controls.style.display = (isBusy || isPaused) ? 'flex' : 'none';
-                if (btnPause) btnPause.style.display = isPaused ? 'none' : 'inline-block';
-                if (btnResume) btnResume.style.display = isPaused ? 'inline-block' : 'none';
-            }
-        })
+        .then(renderStatus)
         .catch(error => {
             console.error('Error:', error);
-            document.getElementById('status').innerText = 'Error loading status.';
+            renderStatus({ error: 'Error loading status.' });
         });
+}
+
+function renderStatus(data) {
+    const online = !!data.is_online;
+    const status = data.status || '';
+    const mix = online ? data.mix : null;
+    const mixEnded = mix && mix.state !== 'running';
+    const isPausedHW = online && status.includes('PAUSED_HW');
+    const isPaused = isPausedHW || (online && status.includes('PAUSED_LIFTED'));
+    // After a job the printer stays BUSY with COMPLETE/STOPPED: not active
+    const isDone = /Print Status: (COMPLETE|STOPPED|CANCELED|IDLE)/.test(status);
+    const isBusy = online && status.includes('BUSY') && !isDone && !mixEnded;
+    // Printer keeps BUSY until its 'print complete' screen is confirmed
+    const needsConfirm = online && isDone && status.includes('BUSY');
+    const jobShown = online && data.file && (isBusy || isPaused || needsConfirm);
+    printerState = { ...data, isBusy, isPaused, needsConfirm, jobShown };
+
+    const badge = document.getElementById('online-status');
+    badge.className = 'online-status ' + (online ? 'online' : 'offline');
+    badge.textContent = online ? 'ONLINE' : 'OFFLINE';
+
+    // Status grid
+    const grid = document.getElementById('status-grid');
+    grid.innerHTML = '';
+    const item = (label, value, extra) => {
+        const d = document.createElement('div');
+        d.className = 'status-item';
+        const l = document.createElement('span');
+        l.className = 'field-label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'field-value';
+        v.textContent = value;
+        d.append(l, v);
+        if (extra) v.appendChild(extra);
+        grid.appendChild(d);
+    };
+    if (!online) {
+        item('Printer', data.error || (data.printer ? data.printer + ' does not answer' : data.status || 'Offline'));
+    } else {
+        item('Machine', data.machine || '—');
+        if (mix) {
+            item('Mix', mix.state === 'finished' ? 'Finished ✓'
+                : mix.state === 'stopped' ? `Stopped at cycle ${mix.cycle} / ${mix.cycles}`
+                : `Cycle ${mix.cycle} / ${mix.cycles}`);
+            item('File', 'Resin mix');
+        } else {
+            item('Print', data.print || '—');
+            let layers = '—';
+            if (data.total_layers) {
+                layers = `${data.current_layer} / ${data.total_layers}`;
+                const lh = data.layer_height;
+                if (lh) layers += `  ·  ${fmtMM(data.current_layer * lh)} / ${fmtMM(data.total_layers * lh)} mm`;
+            }
+            item('Layer', layers);
+            let thumb = null;
+            if (data.file && data.file !== selectedFile && data.file in fileInfo) {
+                thumb = Object.assign(document.createElement('img'), { className: 'mini-thumb', alt: '', src: previewUrl(data.file) });
+                thumb.onerror = () => thumb.remove();
+            }
+            item('File', data.file || '—', thumb);
+        }
+    }
+
+    document.getElementById('confirm-hint').style.display = needsConfirm ? 'block' : 'none';
+
+    // Progress
+    const bar = document.getElementById('progress-bar');
+    const text = document.getElementById('progress-text');
+    const pct = online ? (parseFloat(data.progress) || 0) : 0;
+    bar.style.width = pct.toFixed(2) + '%';
+    bar.classList.toggle('done', !!(mix && mix.state === 'finished'));
+    bar.classList.toggle('mixing', !!(mix && mix.state === 'running'));
+    text.textContent = !mix ? pct.toFixed(1) + '%'
+        : mix.state === 'finished' ? 'Mix finished ✓'
+        : mix.state === 'stopped' ? 'Mix stopped'
+        : 'Mixing ' + pct.toFixed(0) + '%';
+
+    const timeInfo = document.getElementById('time-info');
+    const showTime = (isBusy || isPaused) && data.remaining_s != null;
+    timeInfo.style.display = showTime ? 'flex' : 'none';
+    if (showTime) {
+        const eta = new Date(Date.now() + data.remaining_s * 1000)
+            .toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+        timeInfo.innerHTML = '';
+        [['Elapsed', formatDuration(data.elapsed_s)],
+         ['Remaining', formatDuration(data.remaining_s)],
+         ['Ready at', isPaused ? '—' : eta]].forEach(([label, value]) => {
+            const span = document.createElement('span');
+            span.textContent = label + ' ';
+            const b = document.createElement('strong');
+            b.textContent = value;
+            span.appendChild(b);
+            timeInfo.appendChild(span);
+        });
+    }
+
+    if (window.setFaviconState) {
+        const fav = !online ? 'offline' : isPaused ? 'paused'
+            : isBusy ? 'printing' : needsConfirm ? 'done' : 'idle';
+        setFaviconState(fav, data.progress);
+    }
+    showJob(data.job);
+
+    const blocked = !online || isBusy || isPaused || needsConfirm;
+    const why = !online ? 'Printer offline' : needsConfirm ? 'Confirm the screen on the printer first'
+        : blocked ? 'Printer is busy' : '';
+    for (const id of ['btn-mix', 'btn-print']) {
+        const b = document.getElementById(id);
+        b.disabled = blocked;
+        b.title = why;
+    }
+
+    const controls = document.getElementById('print-controls');
+    controls.style.display = (isBusy || isPaused) ? 'flex' : 'none';
+    document.getElementById('btn-pause').style.display = isPaused ? 'none' : 'inline-block';
+    document.getElementById('btn-resume').style.display = isPaused ? 'inline-block' : 'none';
+
+    showBigPreview();
+}
+
+function fmtMM(mm) {
+    return (Math.round(mm * 10) / 10).toFixed(1);
 }
 
 // Server-side background job (mix watcher, print after mix)
@@ -362,54 +531,50 @@ function resumePrint() {
         });
 }
 
-let fileVersions = {};  // name -> upload time, busts the preview cache on re-upload
-
 function previewUrl(name) {
-    return '/preview/' + encodeURIComponent(name) + '?v=' + (fileVersions[name] || 0);
+    return '/preview/' + encodeURIComponent(name) + '?v=' + ((fileInfo[name] || {}).uploaded || 0);
 }
 
 function fetchFiles() {
     fetch('/files')
         .then(response => response.json())
-        .then(filesInfo => {
+        .then(files => {
             const tbody = document.getElementById('file-list').querySelector('tbody');
             tbody.innerHTML = '';
-            fileVersions = {};
-            filesInfo.forEach(f => { fileVersions[f.name] = f.uploaded; });
-            if (selectedFile && !(selectedFile in fileVersions)) selectedFile = null;
-            filesInfo.forEach(fileInfo => {
+            fileInfo = {};
+            files.forEach(f => { fileInfo[f.name] = f; });
+            if (selectedFile && !(selectedFile in fileInfo)) selectedFile = null;
+            if (!files.length) {
+                tbody.innerHTML = '<tr class="empty"><td colspan="6">No files yet &mdash; upload a .ctb or .goo.</td></tr>';
+            }
+            files.forEach(f => {
                 const tr = document.createElement('tr');
-                tr.dataset.name = fileInfo.name;
-                if (selectedFile === fileInfo.name) tr.classList.add('selected');
-                tr.addEventListener('click', () => selectFile(fileInfo.name));
-                const tdThumb = document.createElement('td');
-                tdThumb.className = 'thumb-col';
-                const thumb = document.createElement('img');
-                thumb.className = 'thumb';
-                thumb.loading = 'lazy';
-                thumb.alt = '';
+                tr.dataset.name = f.name;
+                if (selectedFile === f.name) tr.classList.add('selected');
+                tr.addEventListener('click', () => selectFile(f.name));
+                const td = (text, cls) => {
+                    const c = document.createElement('td');
+                    if (cls) c.className = cls;
+                    if (text != null) c.textContent = text;
+                    tr.appendChild(c);
+                    return c;
+                };
+                const thumb = Object.assign(document.createElement('img'), { className: 'thumb', loading: 'lazy', alt: '' });
                 thumb.onerror = () => thumb.remove();
-                thumb.src = previewUrl(fileInfo.name);
-                tdThumb.appendChild(thumb);
-                const tdName = document.createElement('td');
-                tdName.textContent = fileInfo.name;
-                const tdDate = document.createElement('td');
-                tdDate.className = 'file-date';
-                tdDate.textContent = formatDate(fileInfo.uploaded);
-                const tdSize = document.createElement('td');
-                tdSize.className = 'file-size';
-                tdSize.textContent = fileInfo.size + ' MB';
-                tr.appendChild(tdThumb);
-                tr.appendChild(tdName);
-                tr.appendChild(tdDate);
-                tr.appendChild(tdSize);
+                thumb.src = previewUrl(f.name);
+                td(null, 'thumb-col').appendChild(thumb);
+                td(f.name, 'file-name');
+                td(f.layers ?? '', 'num muted');
+                td(f.height != null ? fmtMM(f.height) + ' mm' : '', 'num muted');
+                td(formatDate(f.uploaded), 'file-date');
+                td(f.size + ' MB', 'num muted');
                 tbody.appendChild(tr);
             });
-            showFilePreview();
+            showSelected();
         })
         .catch(error => {
             console.error('Error:', error);
-            document.getElementById('file-list').querySelector('tbody').innerHTML = '<tr><td colspan="4">Error loading files.</td></tr>';
+            document.getElementById('file-list').querySelector('tbody').innerHTML = '<tr><td colspan="6">Error loading files.</td></tr>';
         });
 }
 
@@ -430,27 +595,32 @@ function selectFile(filename) {
     document.querySelectorAll('.file-list tbody tr').forEach(tr => {
         tr.classList.toggle('selected', tr.dataset.name === filename);
     });
-    showFilePreview();
+    showSelected();
 }
 
-// Large preview of the selected file under the list
-function showFilePreview() {
-    const box = document.getElementById('file-preview');
-    const img = document.getElementById('file-preview-img');
-    if (!box || !img) return;
-    if (!selectedFile) {
-        box.style.display = 'none';
-        img.removeAttribute('src');
-        img.dataset.src = '';
-        return;
-    }
-    document.getElementById('file-preview-name').textContent = selectedFile;
-    const want = previewUrl(selectedFile);
-    if (img.dataset.src !== want) {
-        img.dataset.src = want;
-        box.style.display = 'none';  // shown by onload if the file has a preview
-        img.src = want;
-    }
+function showSelected() {
+    const f = selectedFile && fileInfo[selectedFile];
+    document.getElementById('selected-name').textContent = selectedFile || '—';
+    document.getElementById('selected-meta').textContent = f && f.layers
+        ? `${f.layers} layers · ${fmtMM(f.height)} mm · ${f.layer_height} mm/layer` : '';
+    showBigPreview();
+}
+
+// Big preview: the selected file, otherwise the job on the printer
+function showBigPreview() {
+    const img = document.getElementById('big-preview');
+    const ps = printerState;
+    let name = null, label = '';
+    if (selectedFile) { name = selectedFile; label = ps.jobShown && ps.file === selectedFile ? 'Printing' : 'Selected'; }
+    else if (ps.jobShown && !ps.mix && ps.file) { name = ps.file; label = 'Printing'; }
+    document.getElementById('preview-label').textContent = label;
+    document.getElementById('preview-name').textContent = name || 'Select a file below';
+    const want = name ? previewUrl(name) : '';
+    if (img.dataset.src === want) return;
+    img.dataset.src = want;
+    img.style.display = 'none';
+    img.nextElementSibling.style.display = 'flex';
+    if (want) img.src = want; else img.removeAttribute('src');
 }
 
 async function deleteSelectedFile() {
