@@ -6,3 +6,4 @@ venv/
 printer_ip.txt
 uploads/
 data/
+dist/

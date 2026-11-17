@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+if [ "$1" = purge ]; then
+    # Uploads and settings (StateDirectory of a DynamicUser service)
+    rm -rf /var/lib/resin-print-portal /var/lib/private/resin-print-portal
+fi

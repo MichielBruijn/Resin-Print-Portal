@@ -1,0 +1,16 @@
+Package: resin-print-portal
+Version: @VERSION@
+Architecture: all
+Maintainer: Michiel Bruijn <MichielBruijn@users.noreply.github.com>
+Installed-Size: @SIZE@
+Depends: python3 (>= 3.11), python3-flask (>= 2.2), python3-cryptography, systemd
+Section: web
+Priority: optional
+Homepage: https://github.com/MichielBruijn/Resin-Print-Portal
+Description: web interface for Elegoo resin printers (SDCP)
+ Resin Print Portal (RPP) uploads .ctb/.goo files to an Elegoo resin printer
+ such as the Mars 4 Ultra and starts, pauses and stops prints over the LAN.
+ It shows progress, print height and slicer previews, can mix the resin,
+ and publishes the printer status to Home Assistant over MQTT.
+ .
+ The web interface listens on port 5001 (see /etc/default/resin-print-portal).

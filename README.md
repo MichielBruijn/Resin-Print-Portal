@@ -201,20 +201,45 @@ Pulls the latest version from GitHub (`git reset --hard HEAD && git pull`) while
 
 ### `requirements.txt`
 
-Python dependencies, installed into `/opt/RPP/venv`:
+Python dependencies for the git install, installed into `/opt/RPP/venv`:
 
 ```
 flask>=3.0
 alive-progress==3.1.4
+cryptography>=42
 ```
 
-`alive-progress` is only used for animated progress bars in the CLI.
+`alive-progress` is only used for animated progress bars in the CLI (optional). `cryptography` reads the layer height from encrypted CTB files.
+
+---
+
+### `packaging/` — Debian package
+
+`packaging/build-deb.sh [version]` builds `dist/resin-print-portal_<version>_all.deb` with `dpkg-deb` (no other build tools). Without an argument the version comes from the latest git tag (`v0.0.10` → `0.0.10`, later commits → `0.0.10+git3.gabc1234`). `packaging/debian/` holds the control template, the systemd unit, `/etc/default/resin-print-portal` and the maintainer scripts. The GitHub workflow `.github/workflows/deb.yml` builds the package for every published release and attaches it.
 
 ---
 
 ## Installation
 
-Tested on Ubuntu 24.04 and 26.04.
+### Debian / Ubuntu package (recommended)
+
+Download `resin-print-portal_<version>_all.deb` from the [latest release](https://github.com/MichielBruijn/Resin-Print-Portal/releases/latest) and install it with apt, which pulls in the dependencies (`python3-flask`, `python3-cryptography`) from your distribution:
+
+```bash
+url=$(curl -fsSL https://api.github.com/repos/MichielBruijn/Resin-Print-Portal/releases/latest | grep -o 'https://[^"]*_all\.deb' | head -1)
+curl -fLO "$url" && sudo apt install "./${url##*/}"
+```
+
+Tested on Debian 12 and 13 and Ubuntu 24.04 and 26.04.
+
+- Starts `resin-print-portal.service` right away and on every boot. It runs as its own unprivileged user (systemd `DynamicUser`).
+- Code in `/usr/share/resin-print-portal`, uploads and settings in `/var/lib/resin-print-portal`.
+- Port and listen address: `/etc/default/resin-print-portal` (default `5001` on all interfaces), then `sudo systemctl restart resin-print-portal`.
+- Logs: `journalctl -u resin-print-portal`.
+- Update: install the newer `.deb` the same way; uploads and settings are kept.
+- `sudo apt remove resin-print-portal` keeps uploads and settings, `sudo apt purge resin-print-portal` deletes them too.
+
+### From git (`/opt/RPP`)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MichielBruijn/Resin-Print-Portal/main/install.sh | bash
@@ -241,6 +266,8 @@ Add the printer (IP address or hostname) under *Printers…* in the web UI.
 The interface runs on port **5001**. It has no authentication: only expose it on a trusted network, or put a reverse proxy (nginx, Apache) with authentication in front of it.
 
 ## Update
+
+Package: install the newer `.deb` (see above). Git install:
 
 ```bash
 bash /opt/RPP/update.sh
