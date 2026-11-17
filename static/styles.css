@@ -431,6 +431,29 @@ body {
 
 .file-list tbody tr:hover { background-color: rgba(249, 115, 22, 0.08); }
 
+.file-list tr.on-printer td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
+.file-list tr.on-printer.paused td:first-child { box-shadow: inset 4px 0 0 #eab308; }
+
+.row-badge {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background-color: rgba(249, 115, 22, 0.15);
+    border: 1px solid rgba(249, 115, 22, 0.6);
+    color: #fdba74;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+tr.paused .row-badge {
+    background-color: rgba(234, 179, 8, 0.12);
+    border-color: rgba(234, 179, 8, 0.5);
+    color: #fde047;
+}
+
 .file-list tr.selected td {
     background-color: rgba(249, 115, 22, 0.18);
     color: #fff;

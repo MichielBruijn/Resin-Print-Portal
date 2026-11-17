@@ -354,6 +354,7 @@ function renderStatus(data) {
     const needsConfirm = online && isDone && status.includes('BUSY');
     const jobShown = online && data.file && (isBusy || isPaused || needsConfirm);
     printerState = { ...data, isBusy, isPaused, needsConfirm, jobShown };
+    markPrintingRow();
 
     const badge = document.getElementById('online-status');
     badge.className = 'online-status ' + (online ? 'online' : 'offline');
@@ -575,6 +576,7 @@ function fetchFiles() {
                 tbody.appendChild(tr);
             });
             showSelected();
+            markPrintingRow();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -592,6 +594,29 @@ function formatDuration(sec) {
 function formatDate(epoch) {
     if (!epoch) return '';
     return new Date(epoch * 1000).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' }).replace(',', '');
+}
+
+// Mark the file that is on the printer in the file list
+function markPrintingRow() {
+    const ps = printerState;
+    const name = ps.jobShown && !ps.mix ? ps.file : null;
+    const text = !name ? '' : ps.isPaused ? 'Paused'
+        : ps.needsConfirm ? 'Finished' : 'Printing ' + Math.floor(ps.progress || 0) + '%';
+    document.querySelectorAll('.file-list tbody tr').forEach(tr => {
+        const on = !!name && tr.dataset.name === name;
+        tr.classList.toggle('on-printer', on);
+        tr.classList.toggle('paused', on && ps.isPaused);
+        const cell = tr.querySelector('.file-name');
+        if (!cell) return;
+        let badge = cell.querySelector('.row-badge');
+        if (on && !badge) {
+            badge = Object.assign(document.createElement('span'), { className: 'row-badge' });
+            cell.appendChild(badge);
+        } else if (!on && badge) {
+            badge.remove();
+        }
+        if (on) badge.textContent = text;
+    });
 }
 
 function selectFile(filename) {
