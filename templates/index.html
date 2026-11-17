@@ -24,12 +24,13 @@
   <section class="card panel">
     <div class="panel-preview">
       <div class="preview-box" id="preview-box">
+        <span id="preview-label" class="preview-label"></span>
         <img id="big-preview" alt="" style="display:none;"
              onload="this.style.display='block'; this.nextElementSibling.style.display='none'"
              onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
         <div class="preview-empty">No preview</div>
       </div>
-      <div class="preview-caption"><span id="preview-label" class="preview-label"></span><span id="preview-name"></span></div>
+      <div class="preview-caption" id="preview-name"></div>
     </div>
 
     <div class="panel-status">
@@ -58,10 +59,6 @@
         <button class="btn btn-print" id="btn-print" onclick="printSelectedFile()">&#9654; Print</button>
         <label class="mix-first" title="Run the mix (cycles/stroke below) right before printing"><input type="checkbox" id="mix-first"> Mix first</label>
       </div>
-      <div class="action-buttons">
-        <button class="btn btn-upload" onclick="uploadFile()">&#8679; Upload</button>
-        <button class="btn btn-delete" onclick="deleteSelectedFile()">&#10005; Delete</button>
-      </div>
       <div class="mix-panel" id="mix-panel">
         <div class="mix-title">Mix resin <span class="mix-hint">pumps the platform, no exposure</span></div>
         <div class="mix-row">
@@ -77,7 +74,13 @@
 
 <main class="files">
   <section class="card files-card">
-    <h2 class="card-title">Files</h2>
+    <div class="files-head">
+      <h2 class="card-title">Files</h2>
+      <div class="files-actions">
+        <button class="btn btn-ghost" id="btn-delete" onclick="deleteSelectedFile()" disabled title="Select a file first">&#10005; Delete selected</button>
+        <button class="btn btn-upload" onclick="uploadFile()">&#8679; Upload</button>
+      </div>
+    </div>
     <table class="file-list" id="file-list">
       <thead>
         <tr>

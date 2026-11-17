@@ -605,6 +605,9 @@ function selectFile(filename) {
 function showSelected() {
     const f = selectedFile && fileInfo[selectedFile];
     document.getElementById('selected-name').textContent = selectedFile || '—';
+    const del = document.getElementById('btn-delete');
+    del.disabled = !selectedFile;
+    del.title = selectedFile ? 'Delete ' + selectedFile : 'Select a file first';
     document.getElementById('selected-meta').textContent = f && f.layers
         ? `${f.layers} layers · ${fmtMM(f.height)} mm · ${f.layer_height} mm/layer` : '';
     showBigPreview();
@@ -615,7 +618,7 @@ function showBigPreview() {
     const img = document.getElementById('big-preview');
     const ps = printerState;
     let name = null, label = '';
-    if (selectedFile) { name = selectedFile; label = ps.jobShown && ps.file === selectedFile ? 'Printing' : 'Selected'; }
+    if (selectedFile) { name = selectedFile; label = ps.jobShown && ps.file === selectedFile ? 'Printing' : ''; }
     else if (ps.jobShown && !ps.mix && ps.file) { name = ps.file; label = 'Printing'; }
     document.getElementById('preview-label').textContent = label;
     document.getElementById('preview-name').textContent = name || 'Select a file below';

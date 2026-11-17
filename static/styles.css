@@ -174,6 +174,7 @@ body {
 }
 
 .preview-box {
+    position: relative;
     height: 240px;
     background-color: #000;
     border: 1px solid var(--border);
@@ -200,17 +201,21 @@ body {
     font-size: 0.85rem;
     color: var(--muted);
     word-break: break-word;
-    display: flex;
-    gap: 8px;
-    align-items: baseline;
 }
 
+/* "Printing" badge on the preview */
 .preview-label {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent);
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background-color: rgba(15, 23, 42, 0.8);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .preview-label:empty { display: none; }
@@ -364,6 +369,25 @@ body {
 }
 
 /* === File list (scrolls under the panel) === */
+.files-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.files-head .card-title { margin-bottom: 0; }
+
+.files-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.files-actions .btn { padding: 7px 14px; }
+#btn-delete:not(:disabled):hover { border-color: var(--red); color: #fca5a5; background-color: transparent; }
+
 .files-card {
     max-width: var(--page);
     width: calc(100% - 40px);
