@@ -16,6 +16,7 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 - Saved printers: pick the active printer from a list in the header
 - **Home Assistant**: publishes the full printer status over MQTT (broker, login, topic and interval set in the web UI)
 - **Mix resin**: pump the platform up and down (no exposure) to stir the resin in the vat
+- **Raise platform when done** (.goo): lift the print out of the vat to a chosen height after the last layer
 
 ## File overview
 
@@ -244,6 +245,12 @@ bash /opt/RPP/update.sh
 ```
 
 **Upgrading from v0.0.3 or older:** `printer_ip.txt` is no longer tracked by git, so the old `update.sh` deletes it during the pull. Run `bash /opt/RPP/update.sh` twice (the second run uses the new script and recreates the file) and enter the printer address again in the web UI. Or save it first: `cp /opt/RPP/printer_ip.txt /tmp/rpp_printer_ip.txt` — the new script restores it from there.
+
+## Raise the platform when done
+
+The printer has no remote move command, so the lift has to be in the file. With **Raise platform to … mm when done** checked, RPP sends a copy of the selected `.goo` with one extra, unexposed layer (black image, LED power 0) right after the last one. That layer lifts the platform to the chosen height at the file's own lift speeds (slow peel distance first) and does not retract. The original file in `uploads/` is not changed. The progress and height display ignore the extra layer.
+
+The copy gets `per_layer=1`, so the printer uses the per-layer Z and lift values; slicers write those equal to the global settings. This only works for `.goo`: encrypted CTB files are sent unchanged. If the model is already within 10 mm of the target height, no layer is added.
 
 ## Mixing resin
 
