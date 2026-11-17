@@ -58,13 +58,6 @@
         <button class="btn btn-print" id="btn-print" onclick="printSelectedFile()">&#9654; Print</button>
         <label class="mix-first" title="Run the mix (cycles/stroke below) right before printing"><input type="checkbox" id="mix-first"> Mix first</label>
       </div>
-      <div class="raise-row" id="raise-row">
-        <label title="Adds an unexposed last layer that lifts the platform out of the vat when the print is done (.goo files only)">
-          <input type="checkbox" id="raise-on" onchange="saveRaise()"> Raise platform to
-          <input type="number" id="raise-mm" min="20" max="165" step="5" value="150" onchange="saveRaise()"> mm when done
-        </label>
-        <span class="raise-note" id="raise-note"></span>
-      </div>
       <div class="action-buttons">
         <button class="btn btn-upload" onclick="uploadFile()">&#8679; Upload</button>
         <button class="btn btn-delete" onclick="deleteSelectedFile()">&#10005; Delete</button>

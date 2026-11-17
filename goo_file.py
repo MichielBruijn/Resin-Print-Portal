@@ -161,29 +161,3 @@ def build_mix(cycles, stroke):
                  wait_after_cure=0.0, wait_after_lift=0.0, wait_before_cure=0.0,
                  pwm=0, data=black, **mv)
     return build(hdr, [layer] * cycles)
-
-
-# --- Raise the platform when a print is done -------------------------------
-RAISE_MIN_MM = 10.0  # don't bother for less than this
-
-
-def add_raise(buf, target_mm):
-    """Slicer .goo + one unexposed last layer that lifts the platform to
-    `target_mm`. None if the platform is already that high (tall print).
-    Needs per_layer=1 so the printer uses the per-layer Z and lift values;
-    slicers already write those equal to the global ones."""
-    hdr, layers = parse(buf)
-    last = layers[-1]
-    target = min(float(target_mm), hdr['machine_z'])
-    z = last['z'] + hdr['layer_height']
-    dist = target - z
-    if dist < RAISE_MIN_MM:
-        return None
-    slow = min(last['lift_h'], dist)  # peel phase as the slicer set it
-    raise_layer = dict(last, pause=0, pause_z=z, z=z, exposure=0.1, light_off_delay=0.0,
-                       wait_after_cure=0.0, wait_after_lift=0.0, wait_before_cure=0.0, pwm=0,
-                       lift_h=slow, lift_h2=dist - slow, retract_h=0.0, retract_h2=0.0,
-                       data=encode_black(hdr['res_x'] * hdr['res_y']))
-    secs = slow / last['lift_s'] * 60 + (dist - slow) / last['lift_s2'] * 60
-    hdr = dict(hdr, per_layer=1, print_time=hdr['print_time'] + int(secs))
-    return build(hdr, layers + [raise_layer])
