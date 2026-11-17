@@ -1,5 +1,7 @@
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
+import ast
+import json
 import subprocess
 import threading
 import time
@@ -8,13 +10,16 @@ import re
 import sys
 import math
 import goo_file
+import mqtt_publish
 import preview
 
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-IP_FILE = os.path.join(BASE_DIR, 'printer_ip.txt')
+IP_FILE = os.path.join(BASE_DIR, 'printer_ip.txt')  # legacy, migrated into settings.json
+DATA_DIR = os.path.join(BASE_DIR, 'data')  # must be writable by the service user
+SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 CASSINI = [sys.executable, os.path.join(BASE_DIR, 'cassini.py')]
 ALLOWED_EXTENSIONS = ('.ctb', '.goo')
 # IP address or hostname; must not start with '-' (would be parsed as an option)
@@ -40,34 +45,180 @@ def favicon():
     return app.send_static_file('favicon.ico')
 
 
-@app.route('/get-printer-ip', methods=['GET'])
-def get_printer_ip():
-    return jsonify({'ip': read_printer_ip() or ''})
+HA_DEFAULTS = {'enabled': False, 'host': '', 'port': 1883, 'username': '', 'password': '',
+               'topic': 'elegoo/mars4/status', 'interval': 30}
+settings_lock = threading.Lock()
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE) as f:
+            s = json.load(f)
+    except FileNotFoundError:
+        s = {}
+    except Exception as e:
+        print(f"Error reading settings: {e}", flush=True)
+        s = {}
+    if 'printers' not in s:  # first run: take over printer_ip.txt
+        try:
+            with open(IP_FILE) as f:
+                ip = f.read().strip()
+        except OSError:
+            ip = ''
+        s['printers'] = [{'name': ip, 'host': ip}] if ip else []
+        s['active'] = ip
+    s['ha'] = {**HA_DEFAULTS, **s.get('ha', {})}
+    return s
+
+
+def save_settings(s):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = SETTINGS_FILE + '.tmp'
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
+        json.dump(s, f, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
+
 
 def read_printer_ip():
-    try:
-        with open(IP_FILE, 'r') as file:
-            return file.read().strip() or None
-    except FileNotFoundError:
-        return None
-    except Exception as e:
-        print(f"Error reading printer IP: {e}", flush=True)
-        return None
+    return load_settings().get('active') or None
 
-@app.route('/set-printer-ip', methods=['POST'])
-def set_printer_ip():
+
+def public_settings(s):
+    ha = dict(s['ha'], password='', password_set=bool(s['ha']['password']))
+    return {'printers': s['printers'], 'active': s.get('active', ''), 'ha': ha, 'ha_state': ha_state}
+
+
+@app.route('/settings')
+def get_settings():
+    return jsonify(public_settings(load_settings()))
+
+
+@app.route('/printers', methods=['POST'])
+def set_printers():
+    """Saved printer list and/or the active printer."""
+    data = request.get_json(silent=True) or {}
+    with settings_lock:
+        s = load_settings()
+        if 'printers' in data:
+            printers = []
+            for p in data['printers'] or []:
+                host = str(p.get('host', '')).strip()
+                name = str(p.get('name', '')).strip()[:60] or host
+                if not HOST_RE.match(host):
+                    return jsonify({'error': f'Invalid IP address or hostname: {host or "(empty)"}'})
+                printers.append({'name': name, 'host': host})
+            s['printers'] = printers
+            if s.get('active') not in [p['host'] for p in printers]:
+                s['active'] = printers[0]['host'] if printers else ''
+        if 'active' in data:
+            if data['active'] not in [p['host'] for p in s['printers']]:
+                return jsonify({'error': 'Unknown printer.'})
+            s['active'] = data['active']
+        try:
+            save_settings(s)
+        except OSError as e:
+            return jsonify({'error': f'Could not save settings: {e}'})
+    print(f"Printers: {[p['host'] for p in s['printers']]}, active {s['active']}", flush=True)
+    return jsonify({'message': 'Saved', **public_settings(s)})
+
+
+def ha_from_request(data, current):
+    """Validated HA settings from the client; empty password keeps the current one."""
+    ha = dict(current)
+    for k in ('enabled',):
+        ha[k] = bool(data.get(k, ha[k]))
+    for k in ('host', 'username', 'topic'):
+        ha[k] = str(data.get(k, ha[k]) or '').strip()
+    if data.get('password'):
+        ha['password'] = str(data['password'])
+    if data.get('clear_password'):
+        ha['password'] = ''
     try:
-        new_ip = ((request.get_json(silent=True) or {}).get('ip') or '').strip()
-        if not HOST_RE.match(new_ip):
-            return jsonify({'error': 'Invalid IP address or hostname.'})
-        print(f"Updating printer IP to: {new_ip}", flush=True)
-        with open(IP_FILE, 'w') as file:
-            file.write(new_ip + '\n')
-        print("Printer IP updated successfully.", flush=True)
-        return jsonify({'message': 'IP updated'})
+        ha['port'] = int(data.get('port', ha['port']))
+        ha['interval'] = int(data.get('interval', ha['interval']))
+    except (TypeError, ValueError):
+        return None, 'Port and interval must be numbers.'
+    if ha['host'] and not HOST_RE.match(ha['host']):
+        return None, 'Invalid broker hostname.'
+    if not 1 <= ha['port'] <= 65535 or not 5 <= ha['interval'] <= 3600:
+        return None, 'Port 1-65535, interval 5-3600 s.'
+    if not ha['topic'] or any(c in ha['topic'] for c in '#+'):
+        return None, 'Invalid topic.'
+    if ha['enabled'] and not ha['host']:
+        return None, 'Fill in the broker host.'
+    return ha, None
+
+
+@app.route('/ha-settings', methods=['POST'])
+def set_ha_settings():
+    with settings_lock:
+        s = load_settings()
+        ha, err = ha_from_request(request.get_json(silent=True) or {}, s['ha'])
+        if err:
+            return jsonify({'error': err})
+        s['ha'] = ha
+        try:
+            save_settings(s)
+        except OSError as e:
+            return jsonify({'error': f'Could not save settings: {e}'})
+    ha_wake.set()
+    return jsonify({'message': 'Home Assistant settings saved.', **public_settings(s)})
+
+
+@app.route('/ha-test', methods=['POST'])
+def test_ha():
+    """Publish the current printer status once with the settings from the form."""
+    ha, err = ha_from_request(request.get_json(silent=True) or {}, load_settings()['ha'])
+    if err:
+        return jsonify({'error': err})
+    if not ha['host']:
+        return jsonify({'error': 'Fill in the broker host.'})
+    try:
+        payload = full_status_json(read_printer_ip())
+        mqtt_publish.publish(ha['host'], ha['port'], ha['topic'], payload,
+                             ha['username'], ha['password'])
     except Exception as e:
-        print(f"Error updating printer IP: {e}", flush=True)
-        return jsonify({'error': str(e)})
+        return jsonify({'error': f'Broker: {e}'})
+    if not payload:
+        return jsonify({'message': 'Broker login OK; printer did not answer, nothing published.'})
+    return jsonify({'message': f'Published printer status to {ha["topic"]}.'})
+
+
+# --- Home Assistant: publish the full printer status over MQTT ---
+ha_state = {'last_ok': None, 'last_error': None}
+ha_wake = threading.Event()
+
+
+def full_status_json(printer_ip):
+    """cassini status-full as JSON (what HA's MQTT sensors read), or None."""
+    if not printer_ip:
+        return None
+    r = subprocess.run(CASSINI + ['-p', printer_ip, 'status-full'], capture_output=True, text=True, timeout=30)
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    return json.dumps(ast.literal_eval(r.stdout.strip()))
+
+
+def ha_loop():
+    while True:
+        ha = load_settings()['ha']
+        if ha['enabled'] and ha['host']:
+            try:
+                payload = full_status_json(read_printer_ip())
+                if payload:
+                    mqtt_publish.publish(ha['host'], ha['port'], ha['topic'], payload,
+                                         ha['username'], ha['password'])
+                    ha_state.update(last_ok=int(time.time()), last_error=None)
+            except Exception as e:
+                if ha_state['last_error'] != str(e):
+                    print(f"HA publish failed: {e}", flush=True)
+                ha_state['last_error'] = str(e)
+        ha_wake.wait(ha['interval'])
+        ha_wake.clear()
+
+
+threading.Thread(target=ha_loop, daemon=True, name='ha-mqtt').start()
+
 
 def query_status(printer_ip, timeout=10):
     """cassini status output and whether the printer answered."""
@@ -87,25 +238,29 @@ def parse_status(output):
             'layer': int(layer) if layer else None, 'file': grab(r'File: (.+)')}
 
 
+def mix_meta():
+    try:
+        with open(MIX_META) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 @app.route('/print-status')
 def print_status():
     printer_ip = read_printer_ip()
     if printer_ip is None:
-        return jsonify({'status': 'No printer address configured.', 'progress': 0, 'is_online': False})
+        return jsonify({'status': 'No printer configured.', 'progress': 0, 'is_online': False})
 
     try:
         output, is_online = query_status(printer_ip)
+        st = parse_status(output)
 
         match = re.search(r'Layers: (\d+)/(\d+)', output)
-        if match:
-            current_layer, total_layers = match.groups()
-            if int(total_layers) > 0:
-                progress = (int(current_layer) / int(total_layers)) * 100
-            else:
-                progress = 0
-        else:
-            current_layer, total_layers, progress = 'N/A', 'N/A', 0
-        if re.search(r'Print Status: (CANCELED|STOPPED|IDLE)', output):
+        layer, total = (int(match.group(1)), int(match.group(2))) if match else (None, None)
+        progress = layer / total * 100 if total else 0
+        idle = st['print'] in ('CANCELED', 'STOPPED', 'IDLE')
+        if idle:
             progress = 0  # nothing running; the layer count is from the aborted job
 
         elapsed_s = remaining_s = None
@@ -115,16 +270,38 @@ def print_status():
             elapsed_s = t[0] * 3600 + t[1] * 60 + t[2]
             remaining_s = max(t[3] * 3600 + t[4] * 60 + t[5] - elapsed_s, 0)
 
-        fmatch = re.search(r'File: (.+)', output)
+        mix = None
+        meta = mix_meta() if st['file'] == MIX_NAME else None
+        if meta and layer is not None:
+            # The mix file has extra cycles we stop before; show it against the requested count
+            cycles = meta['cycles']
+            done = layer >= cycles
+            ended = idle or st['print'] == 'COMPLETE' or st['machine'] == 'READY'
+            mix = {'cycles': cycles, 'cycle': min(layer, cycles),
+                   'state': 'finished' if done else 'stopped' if ended else 'running'}
+            progress = 100 if done else 0 if ended else layer / cycles * 100
+            total = cycles
+            remaining_s = (elapsed_s / layer * (cycles - layer)) if (elapsed_s and layer and not done) else 0
+
+        info = None
+        if st['file'] and st['file'] != MIX_NAME:
+            path = upload_path(st['file'])
+            info = preview.file_info(path) if path else None
+
         return jsonify({
-            'file': fmatch.group(1).strip() if fmatch else None,
+            'file': st['file'],
+            'machine': st['machine'],
+            'print': st['print'],
             'elapsed_s': elapsed_s,
             'remaining_s': remaining_s,
             'status': output,
-            'current_layer': current_layer,
-            'total_layers': total_layers,
+            'current_layer': layer,
+            'total_layers': total,
+            'layer_height': info['layer_height'] if info else None,
             'progress': progress,
+            'mix': mix,
             'is_online': is_online,
+            'printer': printer_ip,
             'job': job_info,
         })
     except subprocess.TimeoutExpired:
@@ -152,8 +329,11 @@ def list_files():
     for file in files:
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], file)
         st = os.stat(filepath)
+        info = preview.file_info(filepath) or {}
         files_info.append({'name': file, 'size': round(st.st_size / (1024 * 1024), 2),
-                           'uploaded': int(st.st_mtime)})  # upload time, epoch seconds
+                           'uploaded': int(st.st_mtime),  # upload time, epoch seconds
+                           'layers': info.get('layers'), 'height': info.get('height'),
+                           'layer_height': info.get('layer_height')})
     files_info.sort(key=lambda f: f['uploaded'], reverse=True)  # newest first
     return jsonify(files_info)
 
@@ -270,6 +450,7 @@ def print_file():
 
 MIX_DIR = os.path.join(UPLOAD_FOLDER, '.generated')  # hidden from /files
 MIX_NAME = 'rpp_mix.goo'
+MIX_META = os.path.join(MIX_DIR, 'rpp_mix.json')  # requested cycles, for the progress display
 
 
 @app.route('/mix', methods=['POST'])
@@ -350,6 +531,8 @@ def _mix_and_print(printer_ip, cycles, stroke, then_print):
     filepath = os.path.join(MIX_DIR, MIX_NAME)
     with open(filepath, 'wb') as f:
         f.write(goo_file.build_mix(cycles + pad, stroke))
+    with open(MIX_META, 'w') as f:
+        json.dump({'cycles': cycles, 'stroke': stroke, 'pad': pad}, f)
 
     after = f', then print {then_print[1]}' if then_print else ''
     set_job(f'Mixing {cycles} x {stroke:g} mm{after}')

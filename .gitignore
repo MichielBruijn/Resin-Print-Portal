@@ -5,3 +5,4 @@ venv/
 **/.DS_Store
 printer_ip.txt
 uploads/
+data/
