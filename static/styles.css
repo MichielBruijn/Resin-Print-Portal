@@ -442,39 +442,6 @@ body {
     font-size: 0.9rem;
 }
 
-/* === Raise when done === */
-.raise-row {
-    font-size: 0.85rem;
-    color: var(--muted);
-}
-
-.raise-row label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    cursor: pointer;
-}
-
-.raise-row input[type=number] {
-    width: 64px;
-    padding: 4px 6px;
-    background-color: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 0.85rem;
-}
-
-.raise-note {
-    display: block;
-    margin-top: 4px;
-    font-size: 0.78rem;
-    color: #fde047;
-}
-
-.raise-note:empty { display: none; }
-
 /* === Mix panel === */
 .mix-panel {
     margin-top: 4px;

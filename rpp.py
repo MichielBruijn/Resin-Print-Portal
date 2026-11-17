@@ -287,11 +287,6 @@ def print_status():
         if st['file'] and st['file'] != MIX_NAME:
             path = upload_path(st['file'])
             info = preview.file_info(path) if path else None
-        if info and total == info['layers'] + 1:  # raise-when-done layer
-            total = info['layers']
-            layer = min(layer, total)
-            if not idle:
-                progress = layer / total * 100
 
         return jsonify({
             'file': st['file'],
@@ -392,36 +387,12 @@ def upload_and_print(printer_ip, filepath, filename):
     threading.Thread(target=cleanup, daemon=True).start()
     return ok
 
-def run_print_job(printer_ip, filepath, filename, raise_mm=None):
+def run_print_job(printer_ip, filepath, filename):
     """Wrapper that holds the print lock during the entire job."""
     with print_lock:
         job_errors.pop(filename, None)
         progress_status[filename] = 50
-        try:
-            filepath = prepare_file(filepath, filename, raise_mm)
-        except Exception as e:
-            print(f"Preparing {filename} failed: {e}", flush=True)
-            job_errors[filename] = f'Could not add the raise layer: {e}'
-            progress_status[filename] = 100
-            return
         upload_and_print(printer_ip, filepath, filename)
-
-
-def prepare_file(filepath, filename, raise_mm):
-    """Path to send: a copy with a raise-when-done layer if asked (.goo only)."""
-    if not raise_mm or not filename.lower().endswith('.goo'):
-        return filepath
-    with open(filepath, 'rb') as f:
-        data = goo_file.add_raise(f.read(), raise_mm)
-    if data is None:
-        print(f"{filename}: already at {raise_mm:g} mm or higher, no raise layer", flush=True)
-        return filepath
-    os.makedirs(MIX_DIR, exist_ok=True)
-    out = os.path.join(MIX_DIR, filename)  # same name on the printer
-    with open(out, 'wb') as f:
-        f.write(data)
-    print(f"{filename}: raise layer to {raise_mm:g} mm added", flush=True)
-    return out
 
 @app.route('/preview/<filename>')
 def get_preview(filename):
@@ -456,15 +427,6 @@ def print_file():
     if not os.path.exists(filepath):
         return jsonify({'error': f'File {filename} not found.'})
 
-    raise_mm = None
-    if data.get('raise'):
-        try:
-            raise_mm = float(data['raise'])
-        except (TypeError, ValueError):
-            raise_mm = -1
-        if not RAISE_MIN <= raise_mm <= RAISE_MAX:
-            return jsonify({'error': f'Raise height must be {RAISE_MIN}-{RAISE_MAX:g} mm.'})
-
     mix = None
     if data.get('mix'):
         mix, err = mix_params(data['mix'])
@@ -476,18 +438,17 @@ def print_file():
 
     if mix:
         print(f"Queueing mix ({mix[0]} x {mix[1]} mm) + print job for {filename}", flush=True)
-        threading.Thread(target=run_mix_job, args=(printer_ip, *mix, (filepath, filename, raise_mm))).start()
+        threading.Thread(target=run_mix_job, args=(printer_ip, *mix, (filepath, filename))).start()
         return jsonify({'message': f'Mixing first, then printing {filename}', 'filename': MIX_NAME})
 
     print(f"Queueing print job for {filename}", flush=True)
-    job_thread = threading.Thread(target=run_print_job, args=(printer_ip, filepath, filename, raise_mm))
+    job_thread = threading.Thread(target=run_print_job, args=(printer_ip, filepath, filename))
     job_thread.start()
 
     return jsonify({'message': f'Uploading and printing {filename}...', 'filename': filename})
 
 
 MIX_DIR = os.path.join(UPLOAD_FOLDER, '.generated')  # hidden from /files
-RAISE_MIN, RAISE_MAX = 20, 165  # mm; Mars 4 Ultra Z travel is 165 mm
 MIX_NAME = 'rpp_mix.goo'
 MIX_META = os.path.join(MIX_DIR, 'rpp_mix.json')  # requested cycles, for the progress display
 
@@ -628,14 +589,9 @@ def _mix_and_print(printer_ip, cycles, stroke, then_print):
         set_job()
         return
 
-    filepath, filename, raise_mm = then_print
+    filepath, filename = then_print
     time.sleep(3)
     set_job(f'Mixed; sending {filename} to the printer')
-    try:
-        filepath = prepare_file(filepath, filename, raise_mm)
-    except Exception as e:
-        set_job(error=f'Could not add the raise layer to {filename}: {e}')
-        return
     if upload_and_print(printer_ip, filepath, filename):
         set_job()
     else:

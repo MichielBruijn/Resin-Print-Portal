@@ -5,7 +5,6 @@ let fileInfo = {};      // name -> {uploaded, layers, height, layer_height}
 let printerState = {};  // last /print-status answer + derived flags
 
 document.addEventListener('DOMContentLoaded', () => {
-    loadRaise();
     updateMixEstimate();
     fetchPrintStatus();
     fetchFiles();
@@ -235,7 +234,6 @@ function uploadFile() {
 function printSelectedFile() {
     if (selectedFile) {
         const body = { filename: selectedFile };
-        if (raiseApplies()) body.raise = parseFloat(document.getElementById('raise-mm').value);
         if (document.getElementById('mix-first').checked) {
             body.mix = {
                 cycles: parseInt(document.getElementById('mix-cycles').value),
@@ -600,39 +598,8 @@ function selectFile(filename) {
     showSelected();
 }
 
-// Raise-when-done option, remembered in this browser
-function loadRaise() {
-    try {
-        const v = JSON.parse(localStorage.getItem('rpp-raise') || 'null');
-        if (v) {
-            document.getElementById('raise-on').checked = !!v.on;
-            document.getElementById('raise-mm').value = v.mm || 150;
-        }
-    } catch (e) {}
-}
-
-function saveRaise() {
-    try {
-        localStorage.setItem('rpp-raise', JSON.stringify({
-            on: document.getElementById('raise-on').checked,
-            mm: parseFloat(document.getElementById('raise-mm').value) || 150,
-        }));
-    } catch (e) {}
-    showSelected();
-}
-
-function raiseApplies() {
-    return document.getElementById('raise-on').checked && /\.goo$/i.test(selectedFile || '');
-}
-
 function showSelected() {
     const f = selectedFile && fileInfo[selectedFile];
-    const note = document.getElementById('raise-note');
-    const on = document.getElementById('raise-on').checked;
-    const mm = parseFloat(document.getElementById('raise-mm').value) || 0;
-    note.textContent = !on || !selectedFile ? ''
-        : !/\.goo$/i.test(selectedFile) ? 'Only for .goo files — this one prints without it.'
-        : f && f.height && f.height + 10 > mm ? 'Model is already that tall — no extra raise.' : '';
     document.getElementById('selected-name').textContent = selectedFile || '—';
     document.getElementById('selected-meta').textContent = f && f.layers
         ? `${f.layers} layers · ${fmtMM(f.height)} mm · ${f.layer_height} mm/layer` : '';
