@@ -51,6 +51,10 @@ function selectPrinter(host) {
 function openPrinters() {
     const list = document.createElement('div');
     list.className = 'printer-rows';
+    const head = document.createElement('div');
+    head.className = 'printer-row printer-head';
+    head.innerHTML = '<span>Name</span><span>IP address or hostname</span><span></span>';
+    list.appendChild(head);
     const addRow = (p = { name: '', host: '' }) => {
         const row = document.createElement('div');
         row.className = 'printer-row';
@@ -72,7 +76,7 @@ function openPrinters() {
     openModal('Saved printers', body, [
         { label: 'Cancel' },
         { label: 'Save', primary: true, action: close => {
-            const printers = [...list.querySelectorAll('.printer-row')]
+            const printers = [...list.querySelectorAll('.printer-row:not(.printer-head)')]
                 .map(r => ({ name: r.querySelector('.name').value.trim(), host: r.querySelector('.host').value.trim() }))
                 .filter(p => p.name || p.host);
             fetch('/printers', {
