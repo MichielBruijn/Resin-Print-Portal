@@ -1,0 +1,5 @@
+# Resin Print Portal settings; restart after changing:
+#   sudo systemctl restart resin-print-portal
+# Port and address the web interface listens on
+RPP_PORT=5001
+RPP_HOST=0.0.0.0

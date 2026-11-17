@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    if [ -z "$2" ]; then
+        systemctl enable --now resin-print-portal.service
+    else
+        # Upgrade: an upload to the printer in progress is aborted, a running print is not
+        systemctl try-restart resin-print-portal.service
+    fi
+fi

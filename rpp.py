@@ -16,9 +16,11 @@ import preview
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-IP_FILE = os.path.join(BASE_DIR, 'printer_ip.txt')  # legacy, migrated into settings.json
-DATA_DIR = os.path.join(BASE_DIR, 'data')  # must be writable by the service user
+# Writable state: next to the code (git install) or e.g. /var/lib/resin-print-portal (.deb)
+VAR_DIR = os.environ.get('RPP_VAR_DIR') or BASE_DIR
+UPLOAD_FOLDER = os.path.join(VAR_DIR, 'uploads')
+IP_FILE = os.path.join(VAR_DIR, 'printer_ip.txt')  # legacy, migrated into settings.json
+DATA_DIR = os.path.join(VAR_DIR, 'data')  # must be writable by the service user
 SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 CASSINI = [sys.executable, os.path.join(BASE_DIR, 'cassini.py')]
 ALLOWED_EXTENSIONS = ('.ctb', '.goo')
@@ -640,4 +642,4 @@ def delete_file():
 
 if __name__ == '__main__':
     # Never debug=True here: the Werkzeug debugger allows code execution from the LAN
-    app.run(debug=False, port=5001, host='0.0.0.0')
+    app.run(debug=False, port=int(os.environ.get('RPP_PORT', 5001)), host=os.environ.get('RPP_HOST', '0.0.0.0'))

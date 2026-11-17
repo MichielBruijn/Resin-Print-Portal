@@ -1,0 +1,18 @@
+[Unit]
+Description=Resin Print Portal
+Documentation=https://github.com/MichielBruijn/Resin-Print-Portal
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 RPP_VAR_DIR=/var/lib/resin-print-portal
+EnvironmentFile=-/etc/default/resin-print-portal
+ExecStart=/usr/bin/python3 /usr/share/resin-print-portal/rpp.py
+DynamicUser=yes
+StateDirectory=resin-print-portal
+StateDirectoryMode=0700
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
