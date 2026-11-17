@@ -617,6 +617,14 @@ body {
     gap: 8px;
 }
 
+.printer-head {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: -4px;
+}
+
+.printer-head span:last-child { width: 38px; }
+
 .printer-row input, .settings-form input:not([type=checkbox]) {
     padding: 7px 10px;
     background-color: var(--bg);
