@@ -119,7 +119,9 @@ Extracts the slicer's preview image from a slice file and returns it as PNG (no 
 - **`.ctb`**: the preview headers are not encrypted, even in encrypted CTB v4/v5 files, so they are located near the start of the file; the largest image is decoded from ChituBox's RLE-compressed RGB555.
 - **`.goo`**: the 290×290 RGB565 preview from the header.
 
-Results are cached per file version. The printer card shows the preview of the file being printed, if that file was uploaded through RPP.
+`file_info()` reads layer count and layer height from the same headers, for the Layers/Height columns and the height in mm during a print. Encrypted CTB files keep these in an AES-encrypted settings block, which is decrypted with the key ChituBox uses (as published by UVtools; needs the `cryptography` package).
+
+Results are cached per file version. The printer panel shows the preview of the selected file, or of the file being printed if it was uploaded through RPP.
 
 ---
 
@@ -153,8 +155,9 @@ Single-page HTML interface. The top part stays in place, only the file list belo
 
 All browser-side behaviour:
 
-- On load: fetches printer IP, current print status, and file list.
-- Polls `/print-status` every 5 seconds to update the progress bar and control buttons.
+- On load: fetches settings (saved printers), current print status, and file list.
+- Polls `/print-status` every 5 seconds to update the status fields, progress bar, mix progress and control buttons.
+- *Printers…* and *Home Assistant…* open in-page dialogs that save through `/printers` and `/ha-settings`.
 - File upload uses `XMLHttpRequest` with `upload.onprogress` for a real-time upload percentage overlay.
 - After triggering a print, polls `/progress/<filename>` every second until the transfer reaches 100%.
 - Pause/Resume/Stop call their respective endpoints and refresh the status afterwards.
@@ -164,7 +167,7 @@ All browser-side behaviour:
 
 ### `static/styles.css` — Stylesheet
 
-Dark-theme CSS for the web interface. Card layout, progress bar styling, button states, and the loading overlay with spinner.
+Dark-theme CSS for the web interface: pinned top panel with a scrolling file list (normal page scroll below 700 px wide or 720 px high), cards, progress bar (orange printing, purple mixing, green mix finished), button states, dialogs and the loading overlay with spinner.
 
 ---
 
@@ -243,11 +246,28 @@ The interface runs on port **5001**. It has no authentication: only expose it on
 bash /opt/RPP/update.sh
 ```
 
-**Upgrading from v0.0.3 or older:** `printer_ip.txt` is no longer tracked by git, so the old `update.sh` deletes it during the pull. Run `bash /opt/RPP/update.sh` twice (the second run uses the new script and recreates the file) and enter the printer address again in the web UI. Or save it first: `cp /opt/RPP/printer_ip.txt /tmp/rpp_printer_ip.txt` — the new script restores it from there.
+**Upgrading from v0.0.3 or older:** `printer_ip.txt` is no longer tracked by git, so the old `update.sh` deletes it during the pull. Run `bash /opt/RPP/update.sh` twice (the second run uses the new script and recreates the file) and enter the printer address again under *Printers…* in the web UI. Or save it first: `cp /opt/RPP/printer_ip.txt /tmp/rpp_printer_ip.txt` — the new script restores it from there.
+
+## Home Assistant
+
+Under *Home Assistant…* in the header: enable publishing, fill in the MQTT broker (for example the Mosquitto add-on: host `homeassistant`, port 1883, an MQTT user), topic and interval, and use **Test** to check the login. RPP then publishes the printer's full status as JSON to that topic every interval (nothing is published while the printer does not answer). The dialog shows the last publish time or error.
+
+The payload is the printer's SDCP status, so sensors can read for example:
+
+```yaml
+mqtt:
+  sensor:
+    - name: Mars 4 layer
+      state_topic: elegoo/mars4/status
+      value_template: "{{ value_json.Data.Status.PrintInfo.CurrentLayer }}"
+    - name: Mars 4 file
+      state_topic: elegoo/mars4/status
+      value_template: "{{ value_json.Data.Status.PrintInfo.Filename }}"
+```
 
 ## Mixing resin
 
-Pigments settle on the bottom of the vat. The **Mix resin** panel (shown when the printer is idle) sends a generated job that pumps the platform down to the vat floor and up again, without exposing anything:
+Pigments settle on the bottom of the vat. The **Mix resin** panel (its Mix button is enabled when the printer is idle) sends a generated job that pumps the platform down to the vat floor and up again, without exposing anything:
 
 - **Cycles**: number of up/down strokes (default 60, about 6 minutes)
 - **Stroke**: how far the platform lifts, in mm (default 15)
@@ -258,7 +278,7 @@ The generated file is made for the Mars 4 Ultra (see `goo_file.py`).
 
 A completed job leaves the printer on its "print complete" screen (see below), but a stopped one does not. So the mix file gets a few extra cycles (about 20 s), and RPP watches the layer counter and sends **Stop** once the requested number of cycles is done. Nothing hangs on the platform after mixing, so there is nothing to confirm. If the stop is missed, the mix just completes and the screen needs a confirm as before.
 
-**Mix first** (checkbox next to Print) runs that mix with the cycles/stroke from the Mix panel, waits until the printer is ready again and then sends and starts the selected file, so you don't have to be there in between. If the mix is stopped or fails, the print is not started. The purple line in the printer card shows what the background job is doing.
+**Mix first** (checkbox next to Print) runs that mix with the cycles/stroke from the Mix panel, waits until the printer is ready again and then sends and starts the selected file, so you don't have to be there in between. If the mix is stopped or fails, the print is not started. The purple line in the printer panel shows what the background job is doing.
 
 While mixing, the progress bar counts the requested cycles (not the padding cycles), so it reaches 100% and shows **Mix finished ✓** after the automatic stop; a mix stopped early shows **Mix stopped**.
 
