@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 
 SDCP_PORT = 3000
 MAX_SWEEP = 1024  # hosts per subnet for a unicast sweep (/22)
+BATCH, PACE = 32, 0.02  # sweep: 32 packets per 20 ms
 
 
 def local_networks():
@@ -80,17 +81,27 @@ def discover(subnets=(), timeout=2.0):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.setblocking(False)
         socks.append(sock)
-        for t in targets[i:i + 128]:
-            try:
-                sock.sendto(b'M99999', (t, SDCP_PORT))
-            except OSError:
-                pass  # no route, buffer full: skip
+    # Paced (a burst floods the printer's WiFi with the router's ARP requests),
+    # and a second round for whoever hasn't answered yet: UDP gets lost
+    sends = [(rnd * 0.8 + i // BATCH * PACE, socks[i // 128], t)
+             for rnd in range(2) for i, t in enumerate(targets)]
+    timeout = max(timeout, sends[-1][0] + 1.0)
 
     found = {}
     try:
-        end = time.monotonic() + timeout
+        start = time.monotonic()
+        end = start + timeout
         while (left := end - time.monotonic()) > 0:
-            ready, _, _ = select.select(socks, [], [], left)
+            now = time.monotonic() - start
+            while sends and sends[0][0] <= now:
+                _, sock, t = sends.pop(0)
+                if t not in found:
+                    try:
+                        sock.sendto(b'M99999', (t, SDCP_PORT))
+                    except OSError:
+                        pass  # no route, buffer full: skip
+            wait_s = min(left, sends[0][0] - now) if sends else left
+            ready, _, _ = select.select(socks, [], [], max(wait_s, 0))
             for sock in ready:
                 try:
                     data, addr = sock.recvfrom(4096)
