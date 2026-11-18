@@ -14,6 +14,7 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 - Large preview image of the selected model (or the one being printed), from the slice file
 - Layer count and print height in mm (read from the `.ctb`/`.goo` header, also for encrypted CTB)
 - Saved printers: pick the active printer from a list in the header
+- Network search: finds printers via UDP broadcast; for printers in another subnet (behind a router) give the subnet, it is swept host by host (at most /22)
 - **Home Assistant**: publishes the full printer status over MQTT (broker, login, topic and interval set in the web UI)
 - **Mix resin**: pump the platform up and down (no exposure) to stir the resin in the vat
 
@@ -28,6 +29,7 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | `/` | GET | Serves the web interface (`index.html`) |
 | `/settings` | GET | Saved printers, active printer, Home Assistant settings (password left out) and last publish result |
 | `/printers` | POST | Saves the printer list (`printers: [{name, host}]`) and/or the active printer (`active`) |
+| `/discover` | POST | Searches the network for printers (broadcast on every local network, plus a unicast sweep of `subnets`, e.g. `"192.168.1.0/24"`, which is remembered); returns `printers: [{ip, name, machine, firmware, id, status, saved}]` |
 | `/ha-settings` | POST | Saves the Home Assistant/MQTT settings (empty password keeps the stored one) |
 | `/ha-test` | POST | Publishes the current status once with the settings from the form |
 | `/print-status` | GET | Polls the printer status via Cassini and returns JSON with machine/print state, current/total layers, layer height, progress %, elapsed/remaining seconds, mix progress and online state |
@@ -124,6 +126,10 @@ Extracts the slicer's preview image from a slice file and returns it as PNG (no 
 Results are cached per file version. The printer panel shows the preview of the selected file, or of the file being printed if it was uploaded through RPP.
 
 ---
+
+### `discover.py` — Network search
+
+Sends `M99999` to UDP port 3000 on the broadcast address of every local network (from `ip -j addr`) and, for given subnets, to every host; collects the printers' answers for 2 seconds. Run it by hand with `python3 discover.py [subnet ...]`.
 
 ### `simple_mqtt_server.py` — Embedded MQTT broker
 

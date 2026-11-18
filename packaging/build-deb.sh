@@ -19,7 +19,7 @@ trap 'rm -rf "$STAGE"' EXIT
 APP=$STAGE/usr/share/$PKG
 install -d "$APP" "$STAGE/DEBIAN" "$STAGE/usr/lib/systemd/system" "$STAGE/etc/default" "$STAGE/usr/share/doc/$PKG"
 install -m 644 rpp.py cassini.py saturn_printer.py simple_http_server.py simple_mqtt_server.py \
-    goo_file.py preview.py mqtt_publish.py "$APP/"
+    goo_file.py preview.py mqtt_publish.py discover.py "$APP/"
 cp -r static templates "$APP/"
 install -m 644 packaging/debian/$PKG.service "$STAGE/usr/lib/systemd/system/"
 install -m 644 packaging/debian/default "$STAGE/etc/default/$PKG"

@@ -672,7 +672,7 @@ tr.paused .row-badge {
 
 .printer-head span:last-child { width: 38px; }
 
-.printer-row input, .settings-form input:not([type=checkbox]) {
+.printer-row input, .discover-bar input, .settings-form input:not([type=checkbox]) {
     padding: 7px 10px;
     background-color: var(--bg);
     border: 1px solid var(--border);
@@ -773,3 +773,17 @@ tr.paused .row-badge {
     .file-list th:nth-child(6), .file-list td:nth-child(6) { display: none; }
     .settings-form { grid-template-columns: 1fr; }
 }
+
+.discover {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.discover-bar { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.discover-results { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.discover-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text); }
+.discover-row .btn { padding: 4px 12px; }

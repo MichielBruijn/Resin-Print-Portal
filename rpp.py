@@ -7,8 +7,10 @@ import threading
 import time
 import os
 import re
+import socket
 import sys
 import math
+import discover
 import goo_file
 import mqtt_publish
 import preview
@@ -87,7 +89,8 @@ def read_printer_ip():
 
 def public_settings(s):
     ha = dict(s['ha'], password='', password_set=bool(s['ha']['password']))
-    return {'printers': s['printers'], 'active': s.get('active', ''), 'ha': ha, 'ha_state': ha_state}
+    return {'printers': s['printers'], 'active': s.get('active', ''), 'ha': ha, 'ha_state': ha_state,
+            'scan_subnets': s.get('scan_subnets', '')}
 
 
 @app.route('/settings')
@@ -122,6 +125,35 @@ def set_printers():
             return jsonify({'error': f'Could not save settings: {e}'})
     print(f"Printers: {[p['host'] for p in s['printers']]}, active {s['active']}", flush=True)
     return jsonify({'message': 'Saved', **public_settings(s)})
+
+
+@app.route('/discover', methods=['POST'])
+def discover_printers():
+    """Search the network for printers; extra subnets (unicast sweep) are remembered."""
+    text = str((request.get_json(silent=True) or {}).get('subnets', '')).strip()[:200]
+    try:
+        subnets = discover.parse_subnets(text)
+    except ValueError as e:
+        return jsonify({'error': f'Subnet: {e}'})
+    with settings_lock:
+        s = load_settings()
+        if s.get('scan_subnets', '') != text:
+            s['scan_subnets'] = text
+            try:
+                save_settings(s)
+            except OSError:
+                pass
+    found = discover.discover(subnets)
+    saved = {}
+    for p in s['printers']:  # saved hosts may be hostnames
+        try:
+            saved[socket.gethostbyname(p['host'])] = p['host']
+        except OSError:
+            pass
+    for p in found:
+        p['saved'] = saved.get(p['ip'], '')
+    print(f"Discover ({text or 'local'}): {[p['ip'] for p in found]}", flush=True)
+    return jsonify({'printers': found})
 
 
 def ha_from_request(data, current):
