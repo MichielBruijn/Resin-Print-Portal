@@ -5,6 +5,7 @@ import select
 import socket
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 
 SDCP_PORT = 3000
 MAX_SWEEP = 1024  # hosts per subnet for a unicast sweep (/22)
@@ -40,9 +41,30 @@ def parse_subnets(text):
     return nets
 
 
+def hostname(ip):
+    """PTR name of ip, only if it resolves back to the same address; else ''."""
+    try:
+        name = socket.gethostbyaddr(ip)[0]
+        return name if ip in socket.gethostbyname_ex(name)[2] else ''
+    except OSError:
+        return ''
+
+
+def add_hostnames(printers, timeout=2.0):
+    """Fill p['hostname'] in parallel; slow DNS gives up after `timeout`."""
+    if not printers:
+        return
+    pool = ThreadPoolExecutor(max_workers=min(8, len(printers)))
+    futures = {pool.submit(hostname, p['ip']): p for p in printers}
+    done, _ = wait(futures, timeout)
+    for f, p in futures.items():
+        p['hostname'] = f.result() if f in done else ''
+    pool.shutdown(wait=False)
+
+
 def discover(subnets=(), timeout=2.0):
     """Broadcast on every local network + unicast to each host in `subnets`.
-    Returns [{ip, name, machine, firmware, id, status}] sorted by IP."""
+    Returns [{ip, hostname, name, machine, firmware, id, status}] sorted by IP."""
     targets = {'255.255.255.255'}
     targets.update(str(n.broadcast_address) for n in local_networks())
     for net in subnets:
@@ -87,10 +109,12 @@ def discover(subnets=(), timeout=2.0):
     finally:
         for sock in socks:
             sock.close()
-    return sorted(found.values(), key=lambda p: ipaddress.ip_address(p['ip']))
+    printers = sorted(found.values(), key=lambda p: ipaddress.ip_address(p['ip']))
+    add_hostnames(printers)
+    return printers
 
 
 if __name__ == '__main__':
     import sys
     for p in discover(parse_subnets(' '.join(sys.argv[1:]))):
-        print(f"{p['ip']:15} {p['machine']} ({p['name']}) fw {p['firmware']}")
+        print(f"{p['ip']:15} {p['hostname'] or '-':25} {p['machine']} ({p['name']}) fw {p['firmware']}")

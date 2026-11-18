@@ -131,8 +131,9 @@ function discoverPanel(list, addRow) {
                     const row = document.createElement('div');
                     row.className = 'discover-row';
                     const info = document.createElement('span');
-                    info.textContent = `${p.machine || p.name || 'Printer'} — ${p.ip}` + (p.firmware ? ` (${p.firmware})` : '');
-                    const known = p.saved || (hosts().includes(p.ip) ? p.ip : '');
+                    const addr = p.hostname ? `${p.hostname} (${p.ip})` : p.ip;
+                    info.textContent = `${p.machine || p.name || 'Printer'} — ${addr}` + (p.firmware ? `, ${p.firmware}` : '');
+                    const known = p.saved || hosts().find(h => h && (h === p.ip || h === p.hostname)) || '';
                     const b = Object.assign(document.createElement('button'), { className: 'btn btn-ghost', type: 'button',
                         textContent: known ? 'Saved' : 'Add', disabled: !!known });
                     if (known && known !== p.ip) b.title = 'Saved as ' + known;
@@ -142,7 +143,7 @@ function discoverPanel(list, addRow) {
                             .find(r => !r.querySelector('.name').value && !r.querySelector('.host').value);
                         const r = empty || addRow();
                         r.querySelector('.name').value = p.name || p.machine;
-                        r.querySelector('.host').value = p.ip;
+                        r.querySelector('.host').value = p.hostname || p.ip;  // name survives a new DHCP address
                         b.textContent = 'Added';
                         b.disabled = true;
                     };

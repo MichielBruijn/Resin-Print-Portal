@@ -29,7 +29,7 @@ The central application. Starts a Flask HTTP server on port 5001 (debug mode off
 | `/` | GET | Serves the web interface (`index.html`) |
 | `/settings` | GET | Saved printers, active printer, Home Assistant settings (password left out) and last publish result |
 | `/printers` | POST | Saves the printer list (`printers: [{name, host}]`) and/or the active printer (`active`) |
-| `/discover` | POST | Searches the network for printers (broadcast on every local network, plus a unicast sweep of `subnets`, e.g. `"192.168.1.0/24"`, which is remembered); returns `printers: [{ip, name, machine, firmware, id, status, saved}]` |
+| `/discover` | POST | Searches the network for printers (broadcast on every local network, plus a unicast sweep of `subnets`, e.g. `"192.168.1.0/24"`, which is remembered); returns `printers: [{ip, hostname, name, machine, firmware, id, status, saved}]` |
 | `/ha-settings` | POST | Saves the Home Assistant/MQTT settings (empty password keeps the stored one) |
 | `/ha-test` | POST | Publishes the current status once with the settings from the form |
 | `/print-status` | GET | Polls the printer status via Cassini and returns JSON with machine/print state, current/total layers, layer height, progress %, elapsed/remaining seconds, mix progress and online state |
@@ -129,7 +129,7 @@ Results are cached per file version. The printer panel shows the preview of the 
 
 ### `discover.py` — Network search
 
-Sends `M99999` to UDP port 3000 on the broadcast address of every local network (from `ip -j addr`) and, for given subnets, to every host; collects the printers' answers for 2 seconds. Run it by hand with `python3 discover.py [subnet ...]`.
+Sends `M99999` to UDP port 3000 on the broadcast address of every local network (from `ip -j addr`) and, for given subnets, to every host; collects the printers' answers for 2 seconds, then looks up each printer's DNS name (PTR, only if it resolves back to the same IP); "Add" fills in that name rather than the IP. Run it by hand with `python3 discover.py [subnet ...]`.
 
 ### `simple_mqtt_server.py` — Embedded MQTT broker
 
