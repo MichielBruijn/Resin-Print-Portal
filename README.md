@@ -15,7 +15,7 @@ Fork of [RPP](https://github.com/jjtronics/RPP) by JJtronics, built on [Cassini]
 - Layer count and print height in mm (read from the `.ctb`/`.goo` header, also for encrypted CTB)
 - Saved printers: pick the active printer from a list in the header
 - Network search: finds printers via UDP broadcast; for printers in another subnet (behind a router) give the subnet, it is swept host by host (at most /22)
-- **Home Assistant**: publishes the full printer status over MQTT (broker, login, topic and interval set in the web UI)
+- **Home Assistant**: the printer shows up as a device (MQTT discovery) with status sensors and pause/resume/stop buttons; the raw status is published too (broker, login, topic and interval set in the web UI)
 - **Mix resin**: pump the platform up and down (no exposure) to stir the resin in the vat
 
 ## File overview
@@ -181,9 +181,13 @@ Dark-theme CSS for the web interface: pinned top panel with a scrolling file lis
 
 Saved printers, the active printer and the Home Assistant/MQTT settings, written from the web UI (mode 600: it holds the MQTT password). `data/` must be writable by the service user; `install.sh` and `update.sh` create it. Not tracked by git. On first start the address from the old `printer_ip.txt` is taken over.
 
-### `mqtt_publish.py` — MQTT publisher
+### `mqtt_publish.py` — MQTT client
 
-Minimal MQTT 3.1.1 client (connect with optional login, publish QoS 0, disconnect), no extra packages. A background thread in `rpp.py` publishes `cassini status-full` as JSON every *interval* seconds when Home Assistant is enabled; this replaces a separate `mosquitto_pub` loop.
+Minimal MQTT 3.1.1 client, no extra packages: a one-shot `publish()` (used by *Test*) and a persistent `Client` (login, last will, QoS 0 publish, subscribe, keepalive pings). A background thread in `rpp.py` keeps one connection to the broker when Home Assistant is enabled: every *interval* seconds it publishes `cassini status-full` as JSON plus the device state, and in between it handles button presses.
+
+### `ha_discovery.py` — Home Assistant device
+
+Builds the discovery configs (sensors, binary sensors, buttons) and the flat state JSON from `cassini status-full`.
 
 ---
 
@@ -285,7 +289,29 @@ bash /opt/RPP/update.sh
 
 Under *Home Assistant…* in the header: enable publishing, fill in the MQTT broker (for example the Mosquitto add-on: host `homeassistant`, port 1883, an MQTT user), topic and interval, and use **Test** to check the login. RPP then publishes the printer's full status as JSON to that topic every interval (nothing is published while the printer does not answer). The dialog shows the last publish time or error.
 
-The payload is the printer's SDCP status, so sensors can read for example:
+### Device (MQTT discovery)
+
+With *Add the printer to Home Assistant as a device* checked (default), RPP announces a device per printer (by mainboard ID) under the `homeassistant/` discovery prefix; it appears under the MQTT integration without any YAML:
+
+| Entity | Content |
+|---|---|
+| Status | `idle`, `printing`, `mixing`, `paused`, `finished` (waiting for the screen confirm) |
+| Machine status, Print status | The raw SDCP states (`READY`/`BUSY`, `EXPOSURE`, `COMPLETE`, …) |
+| Progress, Current/Total/Remaining layers | Mix jobs count the requested cycles |
+| Elapsed time, Remaining time, End time | From the printer's own estimate |
+| File, Layer height, Print height | Height and layer height from the file header in RPP's upload folder |
+| RPP job | What RPP's background job is doing, or its last error |
+| Printing, Paused, Confirm screen, Online | Binary sensors |
+| Pause/Resume/Stop print | Buttons; RPP runs the command (a refused one shows up as RPP job) |
+| File transfer (+ progress), Error number, IP address, Screen resolution | Diagnostic |
+
+State goes to `rpp/<mainboard id>/state` (retained), button presses come in on `rpp/<mainboard id>/command`. RPP's last will sets `rpp/<host>/availability` to `offline`, so the entities go unavailable when RPP stops; they are also unavailable while the printer does not answer (except *Online*). Unchecking the option removes the device.
+
+This is everything the Mars 4 Ultra reports (firmware V1.3.0, protocol V1.0.0: capabilities `FILE_TRANSFER` and `PRINT_CONTROL` only). UV LED temperature, release film count, storage and camera, which the Elegoo HA integration shows for newer SDCP V3 printers, don't exist on it. Don't run that integration next to RPP: it points the printer at its own MQTT broker with `M66666`, and RPP does the same for every upload and command, so they keep pulling the printer away from each other.
+
+### Raw status
+
+The topic set in the dialog gets the printer's SDCP status as-is, so sensors can read for example:
 
 ```yaml
 mqtt:
