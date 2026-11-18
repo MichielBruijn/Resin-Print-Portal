@@ -116,6 +116,17 @@ _ENTITIES = [
 ]
 
 
+def firmware(raw, latest, url, page):
+    """Payload for the update entity; unknown latest = no update offered."""
+    installed = raw['Data']['Attributes'].get('FirmwareVersion')
+    out = {'installed_version': installed, 'latest_version': latest or installed,
+           'title': f"{raw['Data']['Attributes'].get('MachineName', 'Printer')} firmware", 'release_url': page}
+    if latest and latest != installed:
+        out['release_summary'] = (f'{latest}: download from Elegoo and install it from a USB stick on the printer. '
+                                  + (url or ''))[:255]
+    return out
+
+
 def configs(printer_id, raw, avail):
     """[(topic, payload)] discovery configs (publish retained); avail = RPP's own availability topic."""
     attr = raw['Data']['Attributes']
@@ -147,6 +158,9 @@ def configs(printer_id, raw, avail):
     add('binary_sensor', 'online', {'name': 'Online', 'device_class': 'connectivity',
         'state_topic': f'{base}/state', 'availability_topic': avail,
         'value_template': "{{ 'ON' if value_json.online else 'OFF' }}"})
+    # Firmware: shows up under Settings > Updates; installing is done on the printer (USB stick)
+    add('update', 'firmware', {'name': 'Firmware', 'device_class': 'firmware', 'entity_category': 'diagnostic',
+        'state_topic': f'{base}/firmware', 'availability_topic': avail})
     for cmd in COMMANDS:
         add('button', cmd, {'name': f'{cmd.capitalize()} print', 'command_topic': f'{base}/command',
             'payload_press': cmd, **both,

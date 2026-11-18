@@ -185,6 +185,10 @@ Saved printers, the active printer and the Home Assistant/MQTT settings, written
 
 Minimal MQTT 3.1.1 client, no extra packages: a one-shot `publish()` (used by *Test*) and a persistent `Client` (login, last will, QoS 0 publish, subscribe, keepalive pings). A background thread in `rpp.py` keeps one connection to the broker when Home Assistant is enabled: every *interval* seconds it publishes `cassini status-full` as JSON plus the device state, and in between it handles button presses.
 
+### `firmware_check.py` — Firmware check
+
+Reads the firmware zip links from Elegoo's download center and picks the newest version whose file name starts with the printer's model (`Mars 4 Ultra-V1.3.0-…zip`). Cached for 12 hours, retried after an hour on failure. `python3 firmware_check.py "ELEGOO Mars 4 Ultra"` shows what it finds.
+
 ### `ha_discovery.py` — Home Assistant device
 
 Builds the discovery configs (sensors, binary sensors, buttons) and the flat state JSON from `cassini status-full`.
@@ -304,6 +308,7 @@ With *Add the printer to Home Assistant as a device* checked (default), RPP anno
 | Printing, Paused, Confirm screen, Online | Binary sensors |
 | Pause/Resume/Stop print | Buttons; RPP runs the command (a refused one shows up as RPP job) |
 | File transfer (+ progress), Error number, IP address, Screen resolution | Diagnostic |
+| Firmware | Update entity (*Settings → Updates*): the newest version for the model on Elegoo's [download center](https://wiki.elegoo.com/en/download-center), checked every 12 hours. Install it from a USB stick on the printer; the summary has the zip link |
 
 State goes to `rpp/<mainboard id>/state` (retained), button presses come in on `rpp/<mainboard id>/command`. RPP's last will sets `rpp/<host>/availability` to `offline`, so the entities go unavailable when RPP stops; they are also unavailable while the printer does not answer (except *Online*). Unchecking the option removes the device.
 
