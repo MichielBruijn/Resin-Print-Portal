@@ -71,7 +71,7 @@ function openPrinters() {
     const add = Object.assign(document.createElement('button'), { className: 'btn btn-ghost', textContent: '+ Add printer' });
     add.onclick = () => addRow().querySelector('input').focus();
     const body = document.createElement('div');
-    body.append(list, add);
+    body.append(list, add, discoverPanel(list, addRow));
 
     openModal('Saved printers', body, [
         { label: 'Cancel' },
@@ -95,6 +95,67 @@ function openPrinters() {
                 });
         } },
     ]);
+}
+
+// Network search (SDCP broadcast); found printers can be added as rows
+function discoverPanel(list, addRow) {
+    const wrap = document.createElement('div');
+    wrap.className = 'discover';
+    const bar = document.createElement('div');
+    bar.className = 'discover-bar';
+    const subnets = Object.assign(document.createElement('input'), {
+        value: settings.scan_subnets || '', placeholder: 'Extra subnet, e.g. 192.168.1.0/24 (optional)',
+        title: 'Broadcasts only reach the local network. For printers behind a router, give their subnet (at most /22).' });
+    const btn = Object.assign(document.createElement('button'), { className: 'btn btn-ghost', textContent: 'Search network', type: 'button' });
+    bar.append(subnets, btn);
+    const results = document.createElement('div');
+    results.className = 'discover-results';
+    wrap.append(bar, results);
+
+    const hosts = () => [...list.querySelectorAll('.host')].map(i => i.value.trim());
+    const search = () => {
+        btn.disabled = true;
+        results.textContent = 'Searching…';
+        fetch('/discover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subnets: subnets.value }),
+        })
+            .then(r => r.json())
+            .then(data => {
+                results.innerHTML = '';
+                if (data.error) { results.textContent = data.error; return; }
+                settings.scan_subnets = subnets.value.trim();
+                if (!data.printers.length) { results.textContent = 'No printers found.'; return; }
+                data.printers.forEach(p => {
+                    const row = document.createElement('div');
+                    row.className = 'discover-row';
+                    const info = document.createElement('span');
+                    info.textContent = `${p.machine || p.name || 'Printer'} — ${p.ip}` + (p.firmware ? ` (${p.firmware})` : '');
+                    const known = p.saved || (hosts().includes(p.ip) ? p.ip : '');
+                    const b = Object.assign(document.createElement('button'), { className: 'btn btn-ghost', type: 'button',
+                        textContent: known ? 'Saved' : 'Add', disabled: !!known });
+                    if (known && known !== p.ip) b.title = 'Saved as ' + known;
+                    b.onclick = () => {
+                        // fill an empty row instead of adding one
+                        const empty = [...list.querySelectorAll('.printer-row:not(.printer-head)')]
+                            .find(r => !r.querySelector('.name').value && !r.querySelector('.host').value);
+                        const r = empty || addRow();
+                        r.querySelector('.name').value = p.name || p.machine;
+                        r.querySelector('.host').value = p.ip;
+                        b.textContent = 'Added';
+                        b.disabled = true;
+                    };
+                    row.append(info, b);
+                    results.appendChild(row);
+                });
+            })
+            .catch(() => { results.textContent = 'Search failed.'; })
+            .finally(() => { btn.disabled = false; });
+    };
+    btn.onclick = search;
+    subnets.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); search(); } };
+    return wrap;
 }
 
 // --- Home Assistant (MQTT) ---
