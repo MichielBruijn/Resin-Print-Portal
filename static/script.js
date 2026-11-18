@@ -179,6 +179,12 @@ function openHA() {
         const enBox = Object.assign(document.createElement('input'), { type: 'checkbox', name: 'enabled', checked: ha.enabled });
         en.append(enBox, ' Publish printer status to Home Assistant');
         form.appendChild(en);
+        const disc = document.createElement('label');
+        disc.className = 'check';
+        disc.title = 'Creates a device with sensors and pause/resume/stop buttons (MQTT discovery)';
+        const discBox = Object.assign(document.createElement('input'), { type: 'checkbox', name: 'discovery', checked: ha.discovery });
+        disc.append(discBox, ' Add the printer to Home Assistant as a device');
+        form.appendChild(disc);
         field('Broker host', 'host', { value: ha.host, placeholder: 'homeassistant' });
         field('Port', 'port', { type: 'number', value: ha.port, min: 1, max: 65535 });
         field('Username', 'username', { value: ha.username, autocomplete: 'off' });
@@ -197,6 +203,7 @@ function openHA() {
         const values = () => {
             const v = Object.fromEntries(new FormData(form));
             v.enabled = enBox.checked;
+            v.discovery = discBox.checked;
             return v;
         };
         const post = (url, done) => fetch(url, {

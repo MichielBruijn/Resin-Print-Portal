@@ -12,6 +12,7 @@ import sys
 import math
 import discover
 import goo_file
+import ha_discovery
 import mqtt_publish
 import preview
 
@@ -50,7 +51,7 @@ def favicon():
 
 
 HA_DEFAULTS = {'enabled': False, 'host': '', 'port': 1883, 'username': '', 'password': '',
-               'topic': 'elegoo/mars4/status', 'interval': 30}
+               'topic': 'elegoo/mars4/status', 'interval': 30, 'discovery': True}
 settings_lock = threading.Lock()
 
 
@@ -159,7 +160,7 @@ def discover_printers():
 def ha_from_request(data, current):
     """Validated HA settings from the client; empty password keeps the current one."""
     ha = dict(current)
-    for k in ('enabled',):
+    for k in ('enabled', 'discovery'):
         ha[k] = bool(data.get(k, ha[k]))
     for k in ('host', 'username', 'topic'):
         ha[k] = str(data.get(k, ha[k]) or '').strip()
@@ -233,25 +234,98 @@ def full_status_json(printer_ip):
     return json.dumps(ast.literal_eval(r.stdout.strip()))
 
 
+HA_NODE = re.sub(r'[^A-Za-z0-9_-]', '_', socket.gethostname()) or 'rpp'
+HA_AVAIL = f'rpp/{HA_NODE}/availability'  # this RPP instance; last will = offline
+_file_info_cache = {}
+
+
+def ha_printer_state(raw):
+    """ha_discovery.state() with what RPP knows about the job (file header, mix, background job)."""
+    if not raw:
+        return ha_discovery.state(None)
+    fname = raw['Data']['Status'].get('PrintInfo', {}).get('Filename') or ''
+    info = None
+    if fname and fname != MIX_NAME:
+        path = upload_path(fname)
+        if path and os.path.exists(path):
+            key = (fname, os.path.getmtime(path))
+            if key not in _file_info_cache:
+                _file_info_cache.clear()
+                _file_info_cache[key] = preview.file_info(path)
+            info = _file_info_cache[key]
+    mix = mix_meta() if fname == MIX_NAME else None
+    return ha_discovery.state(raw, info, mix, job_info)
+
+
 def ha_loop():
+    client, conn_key = None, None
+    known_ids = {}  # printer host -> mainboard id, to report it offline later
+    announced, removed = set(), set()
     while True:
         ha = load_settings()['ha']
-        if ha['enabled'] and ha['host']:
-            try:
-                payload = full_status_json(read_printer_ip())
-                if payload:
-                    mqtt_publish.publish(ha['host'], ha['port'], ha['topic'], payload,
-                                         ha['username'], ha['password'])
-                    ha_state.update(last_ok=int(time.time()), last_error=None)
-            except Exception as e:
-                if ha_state['last_error'] != str(e):
-                    print(f"HA publish failed: {e}", flush=True)
-                ha_state['last_error'] = str(e)
-        ha_wake.wait(ha['interval'])
+        key = (ha['host'], ha['port'], ha['username'], ha['password'])
+        if client and (key != conn_key or not ha['enabled']):
+            client.close()
+            client, announced = None, set()
+        if not (ha['enabled'] and ha['host']):
+            ha_wake.wait(ha['interval'])
+            ha_wake.clear()
+            continue
+        pid = None
+        try:
+            if not client:
+                client = mqtt_publish.Client(ha['host'], ha['port'], ha['username'], ha['password'],
+                                             will=(HA_AVAIL, 'offline', True)).connect()
+                conn_key = key
+                client.publish(HA_AVAIL, 'online', retain=True)
+                client.subscribe('rpp/+/command')
+            host = read_printer_ip()
+            payload = full_status_json(host)
+            raw = json.loads(payload) if payload else None
+            if raw:
+                pid = raw['Data']['Attributes']['MainboardID']
+                known_ids[host] = pid
+                client.publish(ha['topic'], payload)  # raw status, for existing MQTT sensors
+            else:
+                pid = known_ids.get(host)
+            if pid and ha['discovery'] and raw and pid not in announced:
+                for topic, cfg in ha_discovery.configs(pid, raw, HA_AVAIL):
+                    client.publish(topic, cfg, retain=True)
+                announced.add(pid)
+                removed.discard(pid)
+            elif pid and raw and not ha['discovery'] and pid not in removed:
+                for topic, _ in ha_discovery.configs(pid, raw, HA_AVAIL):
+                    client.publish(topic, '', retain=True)  # empty retained config = remove entity
+                removed.add(pid)
+                announced.discard(pid)
+            if pid:
+                client.publish(f'{ha_discovery.base_topic(pid)}/state',
+                               json.dumps(ha_printer_state(raw)), retain=True)
+            ha_state.update(last_ok=int(time.time()), last_error=None)
+
+            # Until the next round: answer button presses from HA
+            end = time.monotonic() + ha['interval']
+            while not ha_wake.is_set() and (left := end - time.monotonic()) > 0:
+                msgs = client.poll(min(left, 1))
+                cmds = [m.decode(errors='replace').strip() for t, m in msgs
+                        if pid and t == f'{ha_discovery.base_topic(pid)}/command']
+                for cmd in cmds:
+                    if cmd in ha_discovery.COMMANDS:
+                        ok, msg = print_control(cmd)
+                        print(f"HA button {cmd}: {msg}", flush=True)
+                        if not ok:
+                            set_job(error=f'Home Assistant {cmd}: {msg}')
+                if cmds:
+                    break  # publish the new status right away
+        except Exception as e:
+            if ha_state['last_error'] != str(e):
+                print(f"HA MQTT failed: {e}", flush=True)
+            ha_state['last_error'] = str(e)
+            if client:
+                client.close(polite=False)
+            client = None
+            ha_wake.wait(ha['interval'])
         ha_wake.clear()
-
-
-threading.Thread(target=ha_loop, daemon=True, name='ha-mqtt').start()
 
 
 def query_status(printer_ip, timeout=10):
@@ -632,20 +706,26 @@ def _mix_and_print(printer_ip, cycles, stroke, then_print):
         set_job(error=f'Print after mix failed: {job_errors.get(filename, "unknown error")}')
 
 
-def _run_print_control(command):
+def print_control(command):
+    """cassini stop/pause/resume -> (ok, message)."""
     printer_ip = read_printer_ip()
     if printer_ip is None:
-        return jsonify({'error': 'Could not read printer IP address.'})
+        return False, 'Could not read printer IP address.'
     try:
         cmd = CASSINI + ['-p', printer_ip, command]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
-            return jsonify({'message': f'{command} successful'})
-        return jsonify({'error': _cassini_error(result.stderr, f'{command} failed')})
+            return True, f'{command} successful'
+        return False, _cassini_error(result.stderr, f'{command} failed')
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Request timed out.'})
+        return False, 'Request timed out.'
     except Exception as e:
-        return jsonify({'error': str(e)})
+        return False, str(e)
+
+
+def _run_print_control(command):
+    ok, msg = print_control(command)
+    return jsonify({'message': msg} if ok else {'error': msg})
 
 @app.route('/stop-print', methods=['POST'])
 def stop_print():
@@ -671,6 +751,9 @@ def delete_file():
         return jsonify({'message': f'File {filename} deleted successfully'})
     except Exception as e:
         return jsonify({'error': str(e)})
+
+# Started last: the loop uses helpers defined above
+threading.Thread(target=ha_loop, daemon=True, name='ha-mqtt').start()
 
 if __name__ == '__main__':
     # Never debug=True here: the Werkzeug debugger allows code execution from the LAN
