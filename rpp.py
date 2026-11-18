@@ -11,6 +11,7 @@ import socket
 import sys
 import math
 import discover
+import firmware_check
 import goo_file
 import ha_discovery
 import mqtt_publish
@@ -261,12 +262,13 @@ def ha_loop():
     client, conn_key = None, None
     known_ids = {}  # printer host -> mainboard id, to report it offline later
     announced, removed = set(), set()
+    fw_sent = {}  # printer id -> last firmware payload
     while True:
         ha = load_settings()['ha']
         key = (ha['host'], ha['port'], ha['username'], ha['password'])
         if client and (key != conn_key or not ha['enabled']):
             client.close()
-            client, announced = None, set()
+            client, announced, fw_sent = None, set(), {}
         if not (ha['enabled'] and ha['host']):
             ha_wake.wait(ha['interval'])
             ha_wake.clear()
@@ -301,6 +303,13 @@ def ha_loop():
             if pid:
                 client.publish(f'{ha_discovery.base_topic(pid)}/state',
                                json.dumps(ha_printer_state(raw)), retain=True)
+            if pid and raw and ha['discovery']:
+                attr = raw['Data']['Attributes']
+                fw = json.dumps(ha_discovery.firmware(raw, *firmware_check.latest(attr.get('MachineName')),
+                                                      firmware_check.PAGE))
+                if fw_sent.get(pid) != fw:
+                    client.publish(f'{ha_discovery.base_topic(pid)}/firmware', fw, retain=True)
+                    fw_sent[pid] = fw
             ha_state.update(last_ok=int(time.time()), last_error=None)
 
             # Until the next round: answer button presses from HA
